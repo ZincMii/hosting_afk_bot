@@ -14,7 +14,7 @@ app.get("/", (req, res) => {
 });
 
 // ===== HỆ THỐNG LOG MANAGEMENT =====
-const LOG_HISTORY_MAX = 200;
+const LOG_HISTORY_MAX = 2000;
 const logHistory = [];
 const originalLog = console.log;
 
@@ -149,7 +149,7 @@ function startBot() {
                 loggedIn = true;
                 console.log("✅ Login thành công! Bắt đầu anti-AFK...");
 
-                const rand = (min, max) => Math.random() * (max - min) + min;
+                //const rand = (min, max) => Math.random() * (max - min) + min;
 
                 // Sneak on/off random 2-5 giây
                 //let sneaking = false;
@@ -176,23 +176,23 @@ function startBot() {
                 //activeIntervals.push(iJump);
 
                 // Xoay nhìn ngẫu nhiên mỗi 3 giây
-                let iLook = setInterval(() => {
-                    if (ended || !isConnected || !bot.entity || currentBot !== bot) return;
-                    const yaw = Math.random() * Math.PI * 2;
-                    const pitch = (Math.random() - 0.5) * 1.0;
-                    bot.look(yaw, pitch, true);
-                }, 30000);
-                activeIntervals.push(iLook);
+                //let iLook = setInterval(() => {
+                //    if (ended || !isConnected || !bot.entity || currentBot !== bot) return;
+                //    const yaw = Math.random() * Math.PI * 2;
+                //    const pitch = (Math.random() - 0.5) * 1.0;
+                //    bot.look(yaw, pitch, true);
+                //}, 30000);
+                //activeIntervals.push(iLook);
 
                 // Đánh tay random 2-5 giây
-                let swingStopped = false;
-                function doSwing() {
-                    if (swingStopped || ended || !isConnected || currentBot !== bot) return;
-                    bot.swingArm();
-                    const t = setTimeout(doSwing, rand(10000, 30000));
-                    activeTimeouts.push(t);
-                }
-                doSwing();
+                //let swingStopped = false;
+                //function doSwing() {
+                //    if (swingStopped || ended || !isConnected || currentBot !== bot) return;
+                //    bot.swingArm();
+                //    const t = setTimeout(doSwing, rand(10000, 30000));
+                //    activeTimeouts.push(t);
+                //}
+                //doSwing();
             }
         }
     });
