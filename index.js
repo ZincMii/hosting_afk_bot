@@ -181,7 +181,7 @@ function startBot() {
                     const yaw = Math.random() * Math.PI * 2;
                     const pitch = (Math.random() - 0.5) * 1.0;
                     bot.look(yaw, pitch, true);
-                }, 3000);
+                }, 30000);
                 activeIntervals.push(iLook);
 
                 // Đánh tay random 2-5 giây
@@ -189,7 +189,7 @@ function startBot() {
                 function doSwing() {
                     if (swingStopped || ended || !isConnected || currentBot !== bot) return;
                     bot.swingArm();
-                    const t = setTimeout(doSwing, rand(2000, 5000));
+                    const t = setTimeout(doSwing, rand(10000, 3000));
                     activeTimeouts.push(t);
                 }
                 doSwing();
