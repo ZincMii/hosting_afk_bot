@@ -69,23 +69,6 @@ function isDuplicateUsername(reason) {
     );
 }
 
-function scheduleReconnect(reason) {
-    if (isReconnecting) return;
-
-    if (isDuplicateUsername(reason)) {
-        console.log("🛑 Đã có bot khác → dừng.");
-        return;
-    }
-
-    isReconnecting = true;
-    console.log(`⚠️ Mất kết nối: ${reason || "unknown"} → reconnect sau 5s...`);
-
-    setTimeout(() => {
-        isReconnecting = false;
-        startBot();
-    }, 5000);
-}
-
 function startBot() {
     if (isConnected || isReconnecting || currentBot) return;
 
@@ -101,6 +84,8 @@ function startBot() {
     let ended = false;
     let loggedIn = false;
     let loginSent = false;
+    let tick = 0;
+    let kickReason = "";
 
     bot.once("spawn", () => {
         isConnected = true;
@@ -112,6 +97,7 @@ function startBot() {
         const lower = text.toLowerCase();
         console.log("📩", text);
 
+        // ===== LOGIN =====
         if (
             !loggedIn &&
             !loginSent &&
@@ -131,61 +117,62 @@ function startBot() {
         ) {
             if (!loggedIn) {
                 loggedIn = true;
-                console.log("✅ Login thành công! Bắt đầu anti-AFK...");
-
-                const rand = (min, max) => Math.random() * (max - min) + min;
-
-                function doRandomAction() {
-                    if (!isConnected) return; // Bảo vệ nếu bot ngắt kết nối giữa chừng
-                    
-                    const actions = ["jump", "look", "sneak", "idle"];
-                    const action = actions[Math.floor(Math.random() * actions.length)];
-
-                    if (action === "jump") {
-                        bot.setControlState("jump", true);
-                        setTimeout(() => bot.setControlState("jump", false), 300);
-                        console.log("Bot nhảy nhẹ");
-                    }
-
-                    if (action === "look") {
-                        const yaw = Math.random() * Math.PI * 2;
-                        const pitch = (Math.random() - 0.5) * 0.5;
-                        bot.look(yaw, pitch, true);
-                        console.log("Bot quay đầu");
-                    }
-
-                    if (action === "sneak") {
-                        bot.setControlState("sneak", true);
-                        setTimeout(() => bot.setControlState("sneak", false), rand(1000, 3000));
-                        console.log("Bot cúi nhẹ");
-                    }
-
-                    if (action === "idle") {
-                        console.log("Bot đứng yên");
-                    }
-
-                    const delay = rand(8000, 15000);
-                    setTimeout(doRandomAction, delay);
-                }
-
-                doRandomAction();
+                console.log("✅ Login thành công! Bắt đầu anti-AFK chuẩn...");
             }
         }
     });
 
-    let kickReason = null;
+    // ===== ANTI AFK (SỬ DỤNG PHYSICSTICK KHÔNG BỊ GRIM) =====
+    bot.on("physicsTick", () => {
+        if (!loggedIn) return;
+
+        tick++;
+
+        // Cúi người mỗi 30 ticks
+        if (tick % 30 === 0) {
+            bot.setControlState("sneak", true);
+        }
+
+        // Đánh tay mỗi 40 ticks
+        if (tick % 40 === 0) {
+            bot.swingArm("right");
+        }
+
+        // Đứng thẳng lại
+        if (tick % 40 === 10) {
+            bot.setControlState("sneak", false);
+        }
+
+        if (tick > 100000) tick = 0;
+    });
 
     bot.on("kicked", (reason) => {
-        kickReason = typeof reason === "object" ? JSON.stringify(reason) : String(reason);
+        kickReason =
+            typeof reason === "object"
+                ? JSON.stringify(reason)
+                : String(reason);
         console.log("🚫 Bị kick:", kickReason);
     });
 
     bot.on("end", (reason) => {
         if (ended) return;
         ended = true;
+
         isConnected = false;
         currentBot = null;
-        scheduleReconnect(kickReason || reason);
+
+        const finalReason = kickReason || reason;
+
+        // ===== Nếu trùng acc → Đợi 30s =====
+        if (isDuplicateUsername(finalReason)) {
+            console.log("🛑 Có bot khác → thử lại sau 30s...");
+            setTimeout(startBot, 30000);
+            return;
+        }
+
+        // ===== Reconnect thông thường sau 5s =====
+        console.log("🔁 Reconnect sau 5s...");
+        setTimeout(startBot, 5000);
     });
 
     bot.on("error", (err) => {
