@@ -164,16 +164,16 @@ function startBot() {
                 doSneak();
 
                 // Nhảy mỗi 5 giây
-                let iJump = setInterval(() => {
-                    if (ended || !isConnected || currentBot !== bot) return;
-                    bot.setControlState("jump", true);
-                    let tJumpOff = setTimeout(() => {
-                        if (isConnected && currentBot === bot) bot.setControlState("jump", false);
-                    }, 200);
-                    activeTimeouts.push(tJumpOff);
-                    console.log("🦘 Nhảy!");
-                }, 5000);
-                activeIntervals.push(iJump);
+                //let iJump = setInterval(() => {
+                //    if (ended || !isConnected || currentBot !== bot) return;
+                //    bot.setControlState("jump", true);
+                //    let tJumpOff = setTimeout(() => {
+                //        if (isConnected && currentBot === bot) bot.setControlState("jump", false);
+                //    }, 200);
+                //    activeTimeouts.push(tJumpOff);
+                //    console.log("🦘 Nhảy!");
+                //}, 5000);
+                //activeIntervals.push(iJump);
 
                 // Xoay nhìn ngẫu nhiên mỗi 3 giây
                 let iLook = setInterval(() => {
