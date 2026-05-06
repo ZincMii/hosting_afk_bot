@@ -127,7 +127,7 @@ function startBot() {
     const bot = mineflayer.createBot({
         host: "zincmii.play.hosting",
         username: "Hosting",
-        version: "1.21.1", // Đặt chính xác phiên bản của server cụm bạn chơi
+        version: "1.21.11", // Đặt chính xác phiên bản của server cụm bạn chơi
     });
 
     currentBot = bot;
