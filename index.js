@@ -7,7 +7,7 @@ const path = require("path");
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
-
+const PORT = process.env.PORT || 80;
 app.use(express.static(path.join(__dirname, "public")));
 
 // ===== LOG =====
@@ -155,7 +155,7 @@ function startBot() {
                     if (sneakStopped) return;
                     sneaking = !sneaking;
                     bot.setControlState("sneak", sneaking);
-                    const t = setTimeout(doSneak, rand(2000, 5000));
+                    const t = setTimeout(doSneak, rand(3000, 6000));
                     intervals.push(t);
                 }
                 doSneak();
@@ -166,10 +166,10 @@ function startBot() {
                         bot.setControlState("jump", true);
                         setTimeout(
                             () => bot.setControlState("jump", false),
-                            200,
+                            1000,
                         );
-                        console.log("🦘 Nhảy!");
-                    }, 5000),
+                        console.log("Bot đang nhảy!");
+                    }, 10000),
                 );
 
                 // Xoay nhìn ngẫu nhiên mỗi 3 giây
@@ -225,6 +225,11 @@ function startBot() {
 
 // ===== START =====
 server.listen(80, () => {
-    originalLog("🌐 Web chạy cổng 3000");
+    originalLog("🌐 Web chạy cổng {PORT}");
+    startBot();
+});
+
+server.listen(PORT, () => {
+    originalLog(`🌐 Web chạy cổng ${PORT}`);
     startBot();
 });
