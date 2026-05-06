@@ -152,16 +152,16 @@ function startBot() {
                 const rand = (min, max) => Math.random() * (max - min) + min;
 
                 // Sneak on/off random 2-5 giây
-                let sneaking = false;
-                let sneakStopped = false;
-                function doSneak() {
-                    if (sneakStopped || ended || !isConnected || currentBot !== bot) return;
-                    sneaking = !sneaking;
-                    bot.setControlState("sneak", sneaking);
-                    const t = setTimeout(doSneak, rand(2000, 5000));
-                    activeTimeouts.push(t);
-                }
-                doSneak();
+                //let sneaking = false;
+                //let sneakStopped = false;
+                //function doSneak() {
+                //    if (sneakStopped || ended || !isConnected || currentBot !== bot) return;
+                //    sneaking = !sneaking;
+                //    bot.setControlState("sneak", sneaking);
+                //    const t = setTimeout(doSneak, rand(2000, 5000));
+                //    activeTimeouts.push(t);
+                //}
+                //doSneak();
 
                 // Nhảy mỗi 5 giây
                 //let iJump = setInterval(() => {
@@ -189,7 +189,7 @@ function startBot() {
                 function doSwing() {
                     if (swingStopped || ended || !isConnected || currentBot !== bot) return;
                     bot.swingArm();
-                    const t = setTimeout(doSwing, rand(10000, 3000));
+                    const t = setTimeout(doSwing, rand(10000, 30000));
                     activeTimeouts.push(t);
                 }
                 doSwing();
