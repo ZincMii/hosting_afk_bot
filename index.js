@@ -223,12 +223,6 @@ function startBot() {
     });
 }
 
-// ===== START =====
-server.listen(80, () => {
-    originalLog("🌐 Web chạy cổng {PORT}");
-    startBot();
-});
-
 server.listen(PORT, () => {
     originalLog(`🌐 Web chạy cổng ${PORT}`);
     startBot();
