@@ -49,8 +49,8 @@ io.on("connection", (socket) => {
 });
 
 // ===== BOT STATE =====
-let isConnected = false; // true khi bot đang ở trong server
-let isReconnecting = false; // true khi đang đợi reconnect
+let isConnected = false;
+let isReconnecting = false;
 let currentBot = null;
 
 function isDuplicateUsername(reason) {
@@ -68,36 +68,22 @@ function isDuplicateUsername(reason) {
 function scheduleReconnect(reason) {
     if (isReconnecting) return;
 
-    // Nếu bị kick vì username trùng → có instance khác đang chạy, dừng hẳn
     if (isDuplicateUsername(reason)) {
-        console.log(
-            `🛑 Dừng: đã có bot khác vào server với cùng username. Không reconnect.`,
-        );
+        console.log("🛑 Đã có bot khác → dừng.");
         return;
     }
 
     isReconnecting = true;
-    console.log(`⚠️ Mất kết nối: ${reason || "unknown"} → thử lại sau 15s...`);
+    console.log(`⚠️ Mất kết nối: ${reason || "unknown"} → reconnect sau 15s...`);
 
     setTimeout(() => {
         isReconnecting = false;
         startBot();
-    }, 15000);
+    }, 5000);
 }
 
 function startBot() {
-    if (isConnected) {
-        console.log("✅ Bot đang trong server, bỏ qua.");
-        return;
-    }
-    if (isReconnecting) {
-        console.log("⏳ Đang chờ reconnect, bỏ qua.");
-        return;
-    }
-    if (currentBot) {
-        console.log("⚡ Bot instance đang tồn tại, bỏ qua.");
-        return;
-    }
+    if (isConnected || isReconnecting || currentBot) return;
 
     console.log("🔄 Đang kết nối bot...");
 
@@ -109,7 +95,6 @@ function startBot() {
 
     currentBot = bot;
     let ended = false;
-    let intervals = [];
     let loggedIn = false;
     let loginSent = false;
 
@@ -123,7 +108,6 @@ function startBot() {
         const lower = text.toLowerCase();
         console.log("📩", text);
 
-        // Server yêu cầu login → gửi lệnh /login (chỉ gửi 1 lần)
         if (
             !loggedIn &&
             !loginSent &&
@@ -136,7 +120,6 @@ function startBot() {
             }, 500);
         }
 
-        // Login thành công → bắt đầu AFK
         if (
             lower.includes("đăng nhập thành công") ||
             lower.includes("logged in successfully") ||
@@ -146,50 +129,41 @@ function startBot() {
                 loggedIn = true;
                 console.log("✅ Login thành công! Bắt đầu anti-AFK...");
 
+                // ===== ANTI AFK (SAFE) =====
                 const rand = (min, max) => Math.random() * (max - min) + min;
 
-                // Sneak on/off random 2-5 giây
-                let sneaking = false;
-                let sneakStopped = false;
-                function doSneak() {
-                    if (sneakStopped) return;
-                    sneaking = !sneaking;
-                    bot.setControlState("sneak", sneaking);
-                    const t = setTimeout(doSneak, rand(3000, 6000));
-                    intervals.push(t);
-                }
-                doSneak();
+                function doRandomAction() {
+                    const actions = ["jump", "look", "sneak", "idle"];
+                    const action = actions[Math.floor(Math.random() * actions.length)];
 
-                // Nhảy mỗi 5 giây
-                intervals.push(
-                    setInterval(() => {
+                    if (action === "jump") {
                         bot.setControlState("jump", true);
-                        setTimeout(
-                            () => bot.setControlState("jump", false),
-                            1000,
-                        );
-                        console.log("Bot đang nhảy!");
-                    }, 10000),
-                );
+                        setTimeout(() => bot.setControlState("jump", false), 300);
+                        console.log("Bot nhảy nhẹ");
+                    }
 
-                // Xoay nhìn ngẫu nhiên mỗi 3 giây
-                intervals.push(
-                    setInterval(() => {
+                    if (action === "look") {
                         const yaw = Math.random() * Math.PI * 2;
-                        const pitch = (Math.random() - 0.5) * 1.0;
+                        const pitch = (Math.random() - 0.5) * 0.5;
                         bot.look(yaw, pitch, true);
-                    }, 3000),
-                );
+                        console.log("Bot quay đầu");
+                    }
 
-                // Đánh tay random 2-5 giây
-                let swingStopped = false;
-                function doSwing() {
-                    if (swingStopped) return;
-                    bot.swingArm();
-                    const t = setTimeout(doSwing, rand(2000, 5000));
-                    intervals.push(t);
+                    if (action === "sneak") {
+                        bot.setControlState("sneak", true);
+                        setTimeout(() => bot.setControlState("sneak", false), rand(1000, 3000));
+                        console.log("Bot cúi nhẹ");
+                    }
+
+                    if (action === "idle") {
+                        console.log("Bot đứng yên");
+                    }
+
+                    const delay = rand(8000, 15000);
+                    setTimeout(doRandomAction, delay);
                 }
-                doSwing();
+
+                doRandomAction();
             }
         }
     });
@@ -197,12 +171,8 @@ function startBot() {
     let kickReason = null;
 
     bot.on("kicked", (reason) => {
-        const r =
-            typeof reason === "object"
-                ? JSON.stringify(reason)
-                : String(reason);
-        kickReason = r;
-        console.log("🚫 Bị kick:", r);
+        kickReason = typeof reason === "object" ? JSON.stringify(reason) : String(reason);
+        console.log("🚫 Bị kick:", kickReason);
     });
 
     bot.on("end", (reason) => {
@@ -210,11 +180,6 @@ function startBot() {
         ended = true;
         isConnected = false;
         currentBot = null;
-
-        intervals.forEach(clearInterval);
-        intervals = [];
-
-        // Dùng lý do kick thực (từ kicked event) thay vì "socketClosed"
         scheduleReconnect(kickReason || reason);
     });
 
