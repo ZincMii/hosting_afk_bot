@@ -2,19 +2,18 @@ const mineflayer = require("mineflayer");
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
-const path = require("path");
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 const PORT = process.env.PORT || 80;
 
-// ===== ROUTE TRANG CHỦ (SỬA LỖI CANNOT GET /) =====
+// ===== ROUTE TRANG CHỦ =====
 app.get("/", (req, res) => {
     res.send(htmlTemplate);
 });
 
-// ===== LOG =====
+// ===== HỆ THỐNG LOG MANAGEMENT =====
 const LOG_HISTORY_MAX = 200;
 const logHistory = [];
 const originalLog = console.log;
@@ -52,10 +51,14 @@ io.on("connection", (socket) => {
     socket.emit("history", logHistory);
 });
 
-// ===== BOT STATE =====
+// ===== CẤU HÌNH & TRẠNG THÁI BOT =====
 let isConnected = false;
 let isReconnecting = false;
 let currentBot = null;
+let movementPhase = 0;
+let afkTimeoutId = null; // Quản lý vòng lặp tránh trùng lặp khi reconnect
+
+const ACTION_INTERVAL = 2500; // Khoảng cách giữa các hành động (2.5 giây) để tránh spam gói tin lên Grim AC
 
 function isDuplicateUsername(reason) {
     const r = String(reason || "").toLowerCase();
@@ -69,6 +72,53 @@ function isDuplicateUsername(reason) {
     );
 }
 
+// ===== VÒNG LẶP DI CHUYỂN ANTI-AFK CHỐNG GRIM =====
+function movementCycle(bot) {
+    // Dừng vòng lặp nếu bot mất kết nối hoặc bị hủy
+    if (!isConnected || !bot || currentBot !== bot) return;
+
+    if (!bot.entity) {
+        afkTimeoutId = setTimeout(() => movementCycle(bot), ACTION_INTERVAL);
+        return;
+    }
+
+    switch (movementPhase) {
+        case 0: // Phase 0: Xoay người một góc nhẹ (Tuyệt đối an toàn, ko di chuyển vị trí)
+            const yaw = bot.entity.yaw + 0.4;
+            bot.look(yaw, bot.entity.pitch, true);
+            console.log("🦘 Bot xoay người góc nhẹ");
+            break;
+
+        case 1: // Phase 1: Đánh tay phải (Swing Arm)
+            bot.swingArm("right");
+            console.log("👊 Bot thực hiện đánh tay");
+            break;
+
+        case 2: // Phase 2: Cúi người (Sneak) và tự nhả ra sau 800ms
+            bot.setControlState("sneak", true);
+            setTimeout(() => {
+                if (currentBot === bot && isConnected) {
+                    bot.setControlState("sneak", false);
+                }
+            }, 800);
+            console.log("👤 Bot cúi người (Sneak)");
+            break;
+
+        case 3: // Phase 3: Ngước lên / Nhìn xuống ngẫu nhiên
+            const pitch = (Math.random() - 0.5) * 0.4;
+            bot.look(bot.entity.yaw, pitch, true);
+            console.log("👀 Bot ngó nghiêng góc nhìn");
+            break;
+    }
+
+    // Chuyển sang phase tiếp theo từ 0 -> 3
+    movementPhase = (movementPhase + 1) % 4;
+
+    // Tiếp tục lặp lại
+    afkTimeoutId = setTimeout(() => movementCycle(bot), ACTION_INTERVAL);
+}
+
+// ===== KHỞI CHẠY BOT MINECRAFT =====
 function startBot() {
     if (isConnected || isReconnecting || currentBot) return;
 
@@ -77,27 +127,26 @@ function startBot() {
     const bot = mineflayer.createBot({
         host: "zincmii.play.hosting",
         username: "Hosting",
-        version: false,
+        version: "1.21.1", // Đặt chính xác phiên bản của server cụm bạn chơi
     });
 
     currentBot = bot;
     let ended = false;
     let loggedIn = false;
     let loginSent = false;
-    let tick = 0;
     let kickReason = "";
 
     bot.once("spawn", () => {
         isConnected = true;
-        console.log("✅ Bot đã vào server!");
+        console.log("✅ Bot đã vào server thành công!");
     });
 
+    // ===== XỬ LÝ CHAT & TỰ ĐỘNG LOGIN =====
     bot.on("message", (jsonMsg) => {
         const text = jsonMsg.toString();
         const lower = text.toLowerCase();
         console.log("📩", text);
 
-        // ===== LOGIN =====
         if (
             !loggedIn &&
             !loginSent &&
@@ -105,9 +154,11 @@ function startBot() {
         ) {
             loginSent = true;
             setTimeout(() => {
-                bot.chat("/login BotAFK123");
-                console.log("🔑 Đã gửi /login");
-            }, 500);
+                if (currentBot === bot) {
+                    bot.chat("/login BotAFK123");
+                    console.log("🔑 Đã gửi lệnh đăng nhập /login");
+                }
+            }, 800);
         }
 
         if (
@@ -117,41 +168,19 @@ function startBot() {
         ) {
             if (!loggedIn) {
                 loggedIn = true;
-                console.log("✅ Login thành công! Bắt đầu anti-AFK chuẩn...");
+                console.log("📝 Đăng nhập thành công! Bắt đầu chu kỳ Anti-AFK Thích Ứng...");
+                
+                // Xóa vòng lặp cũ phòng hờ và chạy vòng lặp mới
+                if (afkTimeoutId) clearTimeout(afkTimeoutId);
+                movementCycle(bot);
             }
         }
     });
 
-    // ===== ANTI AFK (SỬ DỤNG PHYSICSTICK KHÔNG BỊ GRIM) =====
-    bot.on("physicsTick", () => {
-        if (!loggedIn) return;
-
-        tick++;
-
-        // Cúi người mỗi 30 ticks
-        if (tick % 30 === 0) {
-            bot.setControlState("sneak", true);
-        }
-
-        // Đánh tay mỗi 40 ticks
-        if (tick % 40 === 0) {
-            bot.swingArm("right");
-        }
-
-        // Đứng thẳng lại
-        if (tick % 40 === 10) {
-            bot.setControlState("sneak", false);
-        }
-
-        if (tick > 100000) tick = 0;
-    });
-
+    // ===== XỬ LÝ KHI BỊ KICK HOẶC MẤT KẾT NỐI =====
     bot.on("kicked", (reason) => {
-        kickReason =
-            typeof reason === "object"
-                ? JSON.stringify(reason)
-                : String(reason);
-        console.log("🚫 Bị kick:", kickReason);
+        kickReason = typeof reason === "object" ? JSON.stringify(reason) : String(reason);
+        console.log("🚫 Bot bị Kick khỏi Server:", kickReason);
     });
 
     bot.on("end", (reason) => {
@@ -160,18 +189,24 @@ function startBot() {
 
         isConnected = false;
         currentBot = null;
+        
+        // Hủy bỏ lịch trình chạy Anti-AFK của bot cũ ngay lập tức
+        if (afkTimeoutId) {
+            clearTimeout(afkTimeoutId);
+            afkTimeoutId = null;
+        }
 
         const finalReason = kickReason || reason;
 
-        // ===== Nếu trùng acc → Đợi 30s =====
+        // Nếu trùng tài khoản đang online -> Đợi hẳn 30 giây để vào lại
         if (isDuplicateUsername(finalReason)) {
-            console.log("🛑 Có bot khác → thử lại sau 30s...");
+            console.log("🛑 Phát hiện acc trùng đang online -> Đợi 30s sau vào lại...");
             setTimeout(startBot, 30000);
             return;
         }
 
-        // ===== Reconnect thông thường sau 5s =====
-        console.log("🔁 Reconnect sau 5s...");
+        // Mất kết nối thông thường -> Thử kết nối lại sau 5 giây
+        console.log("🔁 Tự động kết nối lại (Reconnect) sau 5s...");
         setTimeout(startBot, 5000);
     });
 
@@ -180,12 +215,13 @@ function startBot() {
     });
 }
 
+// Khởi chạy server Web Express trước rồi bật bot
 server.listen(PORT, () => {
-    originalLog(`🌐 Web chạy cổng ${PORT}`);
+    originalLog(`🌐 Hệ thống Monitor đang chạy tại cổng: ${PORT}`);
     startBot();
 });
 
-// ===== CHỨA GIAO DIỆN HTML CỦA BẠN =====
+// ===== GIAO DIỆN MONITOR WEB (HTML/CSS/JS) =====
 const htmlTemplate = `
 <!DOCTYPE html>
 <html lang="vi">
@@ -509,4 +545,4 @@ const htmlTemplate = `
 </script>
 </body>
 </html>
-`; //
+\`;
