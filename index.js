@@ -56,7 +56,7 @@ let isConnected = false;
 let isReconnecting = false;
 let currentBot = null;
 
-// Mảng quản lý để xóa sạch tiến trình cũ khi mất kết nối hoặc khởi động lại
+// Quản lý dọn dẹp các luồng chạy ngầm của bot cũ
 let activeIntervals = [];
 let activeTimeouts = [];
 
@@ -74,35 +74,38 @@ function isDuplicateUsername(reason) {
 
 function scheduleReconnect(reason) {
     if (isReconnecting) return;
+    isReconnecting = true;
 
+    // Trường hợp 1: Phát hiện trùng tên (acc đang online) -> Chờ 30 giây
     if (isDuplicateUsername(reason)) {
-        console.log(`🛑 Dừng: Đã có bot khác online với cùng username. Không reconnect.`);
+        console.log(`🛑 Phát hiện acc trùng đang online -> Đợi 30s sau đăng nhập lại...`);
+        let tReconnect = setTimeout(() => {
+            isReconnecting = false;
+            startBot();
+        }, 30000); // 30000ms = 30 giây
+        activeTimeouts.push(tReconnect);
         return;
     }
 
-    isReconnecting = true;
-    console.log(`⚠️ Mất kết nối: ${reason || "Không rõ nguyên nhân"} → thử lại sau 15s...`);
-
+    // Trường hợp 2: Bị kick hoặc mất kết nối thông thường -> Chờ 15 giây
+    console.log(`⚠️ Mất kết nối/Bị Kick: ${reason || "Không rõ lý do"} → Reconnect lại sau 15s...`);
     let tReconnect = setTimeout(() => {
         isReconnecting = false;
         startBot();
-    }, 15000);
+    }, 15000); // 15000ms = 15 giây
     activeTimeouts.push(tReconnect);
 }
 
 // ===== KHỞI CHẠY BOT MINECRAFT =====
 function startBot() {
-    if (isConnected || isReconnecting || currentBot) {
-        console.log("⏳ Trạng thái bot bận, bỏ qua khởi tạo mới.");
-        return;
-    }
+    if (isConnected || isReconnecting || currentBot) return;
 
     console.log("🔄 Đang kết nối bot...");
 
     const bot = mineflayer.createBot({
         host: "zincmii.play.hosting",
         username: "Hosting",
-        version: "1.21.11", // Khớp chính xác phiên bản máy chủ bạn yêu cầu
+        version: "1.21.11", 
     });
 
     currentBot = bot;
@@ -144,43 +147,50 @@ function startBot() {
         ) {
             if (!loggedIn) {
                 loggedIn = true;
-                console.log("📝 Đăng nhập thành công! Khởi chạy vòng lặp Anti-AFK Thích Ứng...");
-                
+                console.log("✅ Login thành công! Bắt đầu anti-AFK...");
+
                 const rand = (min, max) => Math.random() * (max - min) + min;
 
-                // 1. Chu kỳ Cúi người (Sneak) ngẫu nhiên 3 - 6 giây (Tuyệt đối an toàn)
+                // Sneak on/off random 2-5 giây
+                let sneaking = false;
+                let sneakStopped = false;
                 function doSneak() {
-                    if (ended || !isConnected || currentBot !== bot) return;
-                    bot.setControlState("sneak", true);
-                    
-                    let tUnsneak = setTimeout(() => {
-                        if (isConnected && currentBot === bot) bot.setControlState("sneak", false);
-                    }, 800);
-                    activeTimeouts.push(tUnsneak);
-
-                    let tNextSneak = setTimeout(doSneak, rand(3000, 6000));
-                    activeTimeouts.push(tNextSneak);
+                    if (sneakStopped || ended || !isConnected || currentBot !== bot) return;
+                    sneaking = !sneaking;
+                    bot.setControlState("sneak", sneaking);
+                    const t = setTimeout(doSneak, rand(2000, 5000));
+                    activeTimeouts.push(t);
                 }
                 doSneak();
 
-                // 2. Chu kỳ Xoay người nhẹ mỗi 4 giây (Tránh dồn ứ gói tin di chuyển)
+                // Nhảy mỗi 5 giây
+                let iJump = setInterval(() => {
+                    if (ended || !isConnected || currentBot !== bot) return;
+                    bot.setControlState("jump", true);
+                    let tJumpOff = setTimeout(() => {
+                        if (isConnected && currentBot === bot) bot.setControlState("jump", false);
+                    }, 200);
+                    activeTimeouts.push(tJumpOff);
+                    console.log("🦘 Nhảy!");
+                }, 5000);
+                activeIntervals.push(iJump);
+
+                // Xoay nhìn ngẫu nhiên mỗi 3 giây
                 let iLook = setInterval(() => {
-                    if (!isConnected || !bot.entity || currentBot !== bot) return;
-                    const yaw = bot.entity.yaw + (Math.random() - 0.5) * 0.8;
-                    const pitch = (Math.random() - 0.5) * 0.4;
+                    if (ended || !isConnected || !bot.entity || currentBot !== bot) return;
+                    const yaw = Math.random() * Math.PI * 2;
+                    const pitch = (Math.random() - 0.5) * 1.0;
                     bot.look(yaw, pitch, true);
-                    console.log("🦘 Bot ngó nghiêng góc nhìn nhẹ");
-                }, 4000);
+                }, 3000);
                 activeIntervals.push(iLook);
 
-                // 3. Chu kỳ Đánh tay phải (Swing Arm) ngẫu nhiên 2 - 5 giây
+                // Đánh tay random 2-5 giây
+                let swingStopped = false;
                 function doSwing() {
-                    if (ended || !isConnected || currentBot !== bot) return;
-                    bot.swingArm("right");
-                    console.log("👊 Bot thực hiện đánh tay");
-                    
-                    let tNextSwing = setTimeout(doSwing, rand(2000, 5000));
-                    activeTimeouts.push(tNextSwing);
+                    if (swingStopped || ended || !isConnected || currentBot !== bot) return;
+                    bot.swingArm();
+                    const t = setTimeout(doSwing, rand(2000, 5000));
+                    activeTimeouts.push(t);
                 }
                 doSwing();
             }
@@ -200,7 +210,7 @@ function startBot() {
         isConnected = false;
         currentBot = null;
         
-        // Clear toàn bộ các vòng lặp hoạt động để không bị rò rỉ gói tin đè lên nhau
+        // Dọn dẹp tuyệt đối toàn bộ luồng cũ để tránh dồn ứ packet
         activeIntervals.forEach(clearInterval);
         activeTimeouts.forEach(clearTimeout);
         activeIntervals = [];
@@ -544,4 +554,5 @@ const htmlTemplate = `
 </script>
 </body>
 </html>
+\`;
 `; //
