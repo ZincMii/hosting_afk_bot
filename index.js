@@ -13,7 +13,7 @@ app.get("/", (req, res) => {
     res.send(htmlTemplate);
 });
 
-// ===== HỆ THỐNG LOG MANAGEMENT =====
+// ===== HỆ THỐNG LOG MANAGEMENT (GIỮ NGUYÊN CODE 2) =====
 const LOG_HISTORY_MAX = 2000;
 const logHistory = [];
 const originalLog = console.log;
@@ -55,10 +55,15 @@ io.on("connection", (socket) => {
 let isConnected = false;
 let isReconnecting = false;
 let currentBot = null;
-
-// Quản lý dọn dẹp các luồng chạy ngầm của bot cũ
 let activeIntervals = [];
 let activeTimeouts = [];
+
+function clearAllTimers() {
+    activeIntervals.forEach(clearInterval);
+    activeTimeouts.forEach(clearTimeout);
+    activeIntervals = [];
+    activeTimeouts = [];
+}
 
 function isDuplicateUsername(reason) {
     const r = String(reason || "").toLowerCase();
@@ -66,33 +71,21 @@ function isDuplicateUsername(reason) {
         r.includes("đã có người") ||
         r.includes("đang chơi") ||
         r.includes("same username") ||
-        r.includes("already connected") ||
-        r.includes("already logged") ||
-        r.includes("duplicate_login")
+        r.includes("already connected")
     );
 }
 
 function scheduleReconnect(reason) {
     if (isReconnecting) return;
     isReconnecting = true;
+    
+    const delay = isDuplicateUsername(reason) ? 30000 : 15000;
+    console.log(`⚠️ Reconnect lại sau ${delay/1000}s...`);
 
-    // Trường hợp 1: Phát hiện trùng tên (acc đang online) -> Chờ 30 giây
-    if (isDuplicateUsername(reason)) {
-        console.log(`🛑 Phát hiện acc trùng đang online -> Đợi 30s sau đăng nhập lại...`);
-        let tReconnect = setTimeout(() => {
-            isReconnecting = false;
-            startBot();
-        }, 30000); // 30000ms = 30 giây
-        activeTimeouts.push(tReconnect);
-        return;
-    }
-
-    // Trường hợp 2: Bị kick hoặc mất kết nối thông thường -> Chờ 15 giây
-    console.log(`⚠️ Mất kết nối/Bị Kick: ${reason || "Không rõ lý do"} → Reconnect lại sau 15s...`);
     let tReconnect = setTimeout(() => {
         isReconnecting = false;
         startBot();
-    }, 15000); // 15000ms = 15 giây
+    }, delay);
     activeTimeouts.push(tReconnect);
 }
 
@@ -105,11 +98,10 @@ function startBot() {
     const bot = mineflayer.createBot({
         host: "zincmii.play.hosting",
         username: "Hosting",
-        version: "1.21.11", 
+        version: "1.21.1", // Chỉnh lại version nếu cần
     });
 
     currentBot = bot;
-    let ended = false;
     let loggedIn = false;
     let loginSent = false;
     let kickReason = "";
@@ -119,118 +111,60 @@ function startBot() {
         console.log("✅ Bot đã vào server thành công!");
     });
 
-    // ===== XỬ LÝ CHAT & TỰ ĐỘNG LOGIN =====
     bot.on("message", (jsonMsg) => {
         const text = jsonMsg.toString();
         const lower = text.toLowerCase();
         console.log("📩", text);
 
-        if (
-            !loggedIn &&
-            !loginSent &&
-            (lower.includes("/login") || lower.includes("đăng nhập"))
-        ) {
+        if (!loggedIn && !loginSent && (lower.includes("/login") || lower.includes("đăng nhập"))) {
             loginSent = true;
             let tLogin = setTimeout(() => {
                 if (currentBot === bot) {
                     bot.chat("/login BotAFK123");
                     console.log("🔑 Đã gửi lệnh đăng nhập /login");
                 }
-            }, 800);
+            }, 1000);
             activeTimeouts.push(tLogin);
         }
 
-        if (
-            lower.includes("đăng nhập thành công") ||
-            lower.includes("logged in successfully") ||
-            lower.includes("successfully logged")
-        ) {
+        if (lower.includes("thành công") || lower.includes("successfully")) {
             if (!loggedIn) {
                 loggedIn = true;
                 console.log("✅ Login thành công! Bắt đầu anti-AFK...");
-
-                //const rand = (min, max) => Math.random() * (max - min) + min;
-
-                // Sneak on/off random 2-5 giây
-                //let sneaking = false;
-                //let sneakStopped = false;
-                //function doSneak() {
-                //    if (sneakStopped || ended || !isConnected || currentBot !== bot) return;
-                //    sneaking = !sneaking;
-                //    bot.setControlState("sneak", sneaking);
-                //    const t = setTimeout(doSneak, rand(2000, 5000));
-                //    activeTimeouts.push(t);
-                //}
-                //doSneak();
-
-                // Nhảy mỗi 5 giây
-                //let iJump = setInterval(() => {
-                //    if (ended || !isConnected || currentBot !== bot) return;
-                //    bot.setControlState("jump", true);
-                //    let tJumpOff = setTimeout(() => {
-                //        if (isConnected && currentBot === bot) bot.setControlState("jump", false);
-                //    }, 200);
-                //    activeTimeouts.push(tJumpOff);
-                //    console.log("🦘 Nhảy!");
-                //}, 5000);
-                //activeIntervals.push(iJump);
-
-                // Xoay nhìn ngẫu nhiên mỗi 3 giây
-                //let iLook = setInterval(() => {
-                //    if (ended || !isConnected || !bot.entity || currentBot !== bot) return;
-                //    const yaw = Math.random() * Math.PI * 2;
-                //    const pitch = (Math.random() - 0.5) * 1.0;
-                //    bot.look(yaw, pitch, true);
-                //}, 30000);
-                //activeIntervals.push(iLook);
-
-                // Đánh tay random 2-5 giây
-                //let swingStopped = false;
-                //function doSwing() {
-                //    if (swingStopped || ended || !isConnected || currentBot !== bot) return;
-                //    bot.swingArm();
-                //    const t = setTimeout(doSwing, rand(10000, 30000));
-                //    activeTimeouts.push(t);
-                //}
-                //doSwing();
+                
+                // Anti-AFK Nhảy mỗi 15s
+                let iJump = setInterval(() => {
+                    if (currentBot !== bot) return;
+                    bot.setControlState("jump", true);
+                    setTimeout(() => bot.setControlState("jump", false), 200);
+                    console.log("🦘 Nhảy!");
+                }, 15000);
+                activeIntervals.push(iJump);
             }
         }
     });
 
-    // ===== XỬ LÝ KHI BỊ KICK HOẶC MẤT KẾT NỐI =====
     bot.on("kicked", (reason) => {
         kickReason = typeof reason === "object" ? JSON.stringify(reason) : String(reason);
-        console.log("🚫 Bot bị Kick khỏi Server:", kickReason);
+        console.log("🚫 Bot bị Kick:", kickReason);
     });
 
     bot.on("end", (reason) => {
-        if (ended) return;
-        ended = true;
-
         isConnected = false;
         currentBot = null;
-        
-        // Dọn dẹp tuyệt đối toàn bộ luồng cũ để tránh dồn ứ packet
-        activeIntervals.forEach(clearInterval);
-        activeTimeouts.forEach(clearTimeout);
-        activeIntervals = [];
-        activeTimeouts = [];
-
+        clearAllTimers();
         scheduleReconnect(kickReason || reason);
     });
 
-    bot.on("error", (err) => {
-        console.error(err);
-    });
+    bot.on("error", (err) => console.error(err));
 }
 
-// Khởi chạy server Web Express trước rồi bật bot
 server.listen(PORT, () => {
-    originalLog(`🌐 Hệ thống Monitor đang chạy tại cổng: ${PORT}`);
+    originalLog(`🌐 Monitor đang chạy tại cổng: ${PORT}`);
     startBot();
 });
 
-// ===== GIAO DIỆN MONITOR WEB (HTML/CSS/JS) =====
+// ===== GIAO DIỆN WEB (LẤY NGUYÊN BẢN CODE 2) =====
 const htmlTemplate = `
 <!DOCTYPE html>
 <html lang="vi">
@@ -449,14 +383,6 @@ const htmlTemplate = `
         .log-msg .tag-ok { color: #00ff96; }
         .log-msg .tag-chat { color: #00ccff; }
         .log-msg .tag-warn { color: #febc2e; }
-        .cursor {
-            display: inline-block;
-            width: 8px; height: 14px;
-            background: #00ff96;
-            animation: blink 1s step-end infinite;
-            vertical-align: middle;
-            margin-left: 2px;
-        }
     </style>
 </head>
 <body>
@@ -487,12 +413,7 @@ const htmlTemplate = `
         <div class="console-dot green"></div>
         <div class="console-title">CONSOLE OUTPUT</div>
     </div>
-    <div id="console">
-        <div class="log-line">
-            <span class="log-time">--:--:--</span>
-            <span class="log-msg">Đang kết nối...<span class="cursor"></span></span>
-        </div>
-    </div>
+    <div id="console"></div>
 </div>
 <script>
     const socket = io();
@@ -516,8 +437,6 @@ const htmlTemplate = `
             .replace(/📩/g, '<span class="tag-chat">📩</span>')
             .replace(/⚠️/g, '<span class="tag-warn">⚠️</span>')
             .replace(/🔑/g, '<span class="tag-ok">🔑</span>')
-            .replace(/📝/g, '<span class="tag-ok">📝</span>')
-            .replace(/🌐/g, '<span class="tag-ok">🌐</span>')
             .replace(/🦘/g, '<span class="tag-ok">🦘</span>')
             .replace(/🔄/g, '<span class="tag-warn">🔄</span>');
     }
@@ -554,5 +473,4 @@ const htmlTemplate = `
 </script>
 </body>
 </html>
-\`;
 `; //
