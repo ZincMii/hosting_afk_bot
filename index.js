@@ -23,7 +23,7 @@ function broadcast(msg, type = "info") {
 
 console.log = (...args) => {
     const msg = args.map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a))).join(" ");
-    originalLog(msg); // Sử dụng log gốc để tránh đệ quy
+    originalLog(msg);
     broadcast(msg, "info");
 };
 
@@ -70,13 +70,12 @@ function scheduleReconnect(reason) {
 
 // ===== KHỞI CHẠY BOT =====
 function startBot() {
-    // Logic check quan trọng: Nếu bot cũ còn tồn tại thì phải dọn dẹp trước
     if (currentBot) {
         try { currentBot.quit(); } catch(e) {}
         currentBot = null;
     }
 
-    console.log("🔄 Đang khởi tạo Bot...");
+    console.log("🔄 Đang khởi tạo Bot phiên bản 1.21.11...");
 
     const bot = mineflayer.createBot({
         host: "zincmii.play.hosting",
@@ -99,12 +98,11 @@ function startBot() {
         const text = jsonMsg.toString();
         const lower = text.toLowerCase();
         
-        // Chỉ log những tin nhắn quan trọng để tránh spam console quá mức
         if (lower.includes("login") || lower.includes("register") || lower.includes("thành công")) {
             console.log("📩 " + text);
         }
 
-        // Logic Auth
+        // Logic Auth tự động
         if (!authDone && !authSent) {
             if (lower.includes("/register") || lower.includes("đăng ký")) {
                 authSent = true;
@@ -115,7 +113,7 @@ function startBot() {
             }
         }
 
-        // Xác nhận đăng nhập thành công
+        // Kích hoạt Anti-AFK sau khi vào game thành công
         if (!authDone && (lower.includes("thành công") || lower.includes("successfully") || lower.includes("logged in"))) {
             authDone = true;
             console.log("🔥 Đã vào game! Kích hoạt Anti-AFK.");
@@ -128,12 +126,15 @@ function startBot() {
                 if (action === "jump") {
                     bot.setControlState("jump", true);
                     setTimeout(() => bot.setControlState("jump", false), 500);
+                    console.log("🦘 Bot thực hiện nhảy");
                 } else if (action === "punch") {
                     bot.swingArm();
+                    console.log("🥊 Bot thực hiện đánh tay");
                 } else if (action === "look") {
                     bot.look(Math.random() * Math.PI * 2, 0);
+                    console.log("👀 Bot đổi góc nhìn");
                 }
-            }, 20000);
+            }, 15000); // Thực hiện hành động mỗi 15 giây
             activeIntervals.push(iAntiAfk);
         }
     });
@@ -172,7 +173,7 @@ server.listen(PORT, () => {
     startBot();
 });
 
-// ===== GIAO DIỆN WEB (GIỮ NGUYÊN NHƯ CŨ) =====
+// ===== GIAO DIỆN WEB (GIỮ NGUYÊN) =====
 const htmlTemplate = `
 <!DOCTYPE html>
 <html lang="vi">
