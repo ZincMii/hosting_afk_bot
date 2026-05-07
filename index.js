@@ -8,15 +8,11 @@ const server = http.createServer(app);
 const io = new Server(server);
 const PORT = process.env.PORT || 80;
 
-// ===== ROUTE TRANG CHỦ =====
-app.get("/", (req, res) => {
-    res.send(htmlTemplate);
-});
-
 // ===== HỆ THỐNG LOG MANAGEMENT =====
-const LOG_HISTORY_MAX = 2000;
+const LOG_HISTORY_MAX = 1000;
 const logHistory = [];
 const originalLog = console.log;
+const originalError = console.error;
 
 function broadcast(msg, type = "info") {
     const entry = { time: new Date().toLocaleTimeString("vi-VN"), msg, type };
@@ -26,38 +22,24 @@ function broadcast(msg, type = "info") {
 }
 
 console.log = (...args) => {
-    const msg = args
-        .map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a)))
-        .join(" ");
-    originalLog(msg);
-    broadcast(msg);
+    const msg = args.map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a))).join(" ");
+    originalLog(msg); // Sử dụng log gốc để tránh đệ quy
+    broadcast(msg, "info");
 };
 
 console.error = (...args) => {
-    const msg = args
-        .map((a) =>
-            a instanceof Error
-                ? a.message
-                : typeof a === "object"
-                  ? JSON.stringify(a)
-                  : String(a),
-        )
-        .join(" ");
-    originalLog("[ERROR]", msg);
-    broadcast("❌ Lỗi " + msg, "error");
+    const msg = args.map((a) => (a instanceof Error ? a.message : typeof a === "object" ? JSON.stringify(a) : String(a))).join(" ");
+    originalError("[ERROR]", msg);
+    broadcast("❌ Lỗi: " + msg, "error");
 };
 
-io.on("connection", (socket) => {
-    socket.emit("history", logHistory);
-});
-
-// ===== CẤU HÌNH & TRẠNG THÁI BOT =====
+// ===== TRẠNG THÁI BOT =====
 let isConnected = false;
 let isReconnecting = false;
 let currentBot = null;
 let activeIntervals = [];
 let activeTimeouts = [];
-let time_Reconnect_Same_User = 0;
+let reconnectCount = 0;
 
 function clearAllTimers() {
     activeIntervals.forEach(clearInterval);
@@ -68,143 +50,125 @@ function clearAllTimers() {
 
 function isDuplicateUsername(reason) {
     const r = String(reason || "").toLowerCase();
-    return (
-        r.includes("tên này đã có người đang chơi") ||
-        r.includes("đã có người") ||
-        r.includes("đang chơi") ||
-        r.includes("same username") ||
-        r.includes("already connected")
-    );
+    return r.includes("tên này đã có người") || r.includes("already connected") || r.includes("same username");
 }
 
 function scheduleReconnect(reason) {
     if (isReconnecting) return;
     isReconnecting = true;
-    time_Reconnect_Same_User += 1;
-    const delay = isDuplicateUsername(reason) ? 30000 : 15000;
-    console.log(`Lần ${time_Reconnect_Same_User} Bot Sẽ Reconnect lại sau ${delay/1000}s...`);
+    reconnectCount++;
+    
+    const delay = isDuplicateUsername(reason) ? 30000 : 10000;
+    console.log(`⚠️ Bot sẽ thử lại lần thứ ${reconnectCount} sau ${delay / 1000}s...`);
 
-    let tReconnect = setTimeout(() => {
+    const tReconnect = setTimeout(() => {
         isReconnecting = false;
         startBot();
     }, delay);
     activeTimeouts.push(tReconnect);
 }
 
-// ===== KHỞI CHẠY BOT MINECRAFT =====
+// ===== KHỞI CHẠY BOT =====
 function startBot() {
-    if (isConnected || isReconnecting || currentBot) return;
+    // Logic check quan trọng: Nếu bot cũ còn tồn tại thì phải dọn dẹp trước
+    if (currentBot) {
+        try { currentBot.quit(); } catch(e) {}
+        currentBot = null;
+    }
 
-    console.log(" 🔄 Đang kết nối bot...");
+    console.log("🔄 Đang khởi tạo Bot...");
 
     const bot = mineflayer.createBot({
         host: "zincmii.play.hosting",
         username: "Hosting",
         version: "1.21.11", 
+        hideErrors: true
     });
 
     currentBot = bot;
-    let authDone = false; // Đã xong phần đăng nhập hoặc đăng ký
     let authSent = false;
+    let authDone = false;
     let kickReason = "";
 
     bot.once("spawn", () => {
         isConnected = true;
-        console.log("✅ Bot đã vào server thành công!");
+        console.log("✅ Bot đã vào server!");
     });
 
     bot.on("message", (jsonMsg) => {
         const text = jsonMsg.toString();
         const lower = text.toLowerCase();
-        console.log("📩", text);
-
-        // --- Logic Tự động Đăng ký (Register) ---
-        if (!authDone && !authSent && (lower.includes("/register") || lower.includes("đăng ký"))) {
-            authSent = true;
-            let tReg = setTimeout(() => {
-                if (currentBot === bot) {
-                    bot.chat("/register BotAFK123 BotAFK123");
-                    console.log("🔑 Đã gửi lệnh đăng ký /register");
-                }
-            }, 1500);
-            activeTimeouts.push(tReg);
+        
+        // Chỉ log những tin nhắn quan trọng để tránh spam console quá mức
+        if (lower.includes("login") || lower.includes("register") || lower.includes("thành công")) {
+            console.log("📩 " + text);
         }
 
-        // --- Logic Tự động Đăng nhập (Login) ---
-        if (!authDone && !authSent && (lower.includes("/login") || lower.includes("đăng nhập"))) {
-            authSent = true;
-            let tLogin = setTimeout(() => {
-                if (currentBot === bot) {
-                    bot.chat("/login BotAFK123");
-                    console.log("🔑 Đã gửi lệnh đăng nhập /login");
-                    bot.chat("/login BotAFK123");
-                    bot.chat("/login BotAFK123");
-                }
-            }, 5000);
-            activeTimeouts.push(tLogin);
-        }
-
-        // --- Xác nhận vào game thành công ---
-        if (lower.includes("thành công") || lower.includes("successfully") || lower.includes("logged in")) {
-            if (!authDone) {
-                authDone = true;
-                console.log("✅ Xác thực thành công! Bắt đầu chuỗi Anti-AFK...");
-                
-                let iAntiAfk = setInterval(() => {
-                    if (currentBot !== bot) return;
-
-                    const actions = ["jump", "punch", "sneak", "move", "look"];
-                    const randomAction = actions[Math.floor(Math.random() * actions.length)];
-
-                    switch (randomAction) {
-                        case "jump":
-                            bot.setControlState("jump", true);
-                            setTimeout(() => bot.setControlState("jump", false), 200);
-                            console.log("🦘 Hành động: Nhảy");
-                            break;
-                        case "punch":
-                            bot.swingArm();
-                            console.log("🥊 Hành động: Đấm (Punch)");
-                            break;
-                        case "sneak":
-                            bot.setControlState("sneak", true);
-                            setTimeout(() => bot.setControlState("sneak", false), 500);
-                            console.log("👣 Hành động: Ngồi (Sneak)");
-                            break;
-                        case "move":
-                            const dir = Math.random() > 0.5 ? "forward" : "back";
-                            bot.setControlState(dir, true);
-                            setTimeout(() => bot.setControlState(dir, false), 300);
-                            console.log(`🏃 Hành động: Di chuyển (${dir})`);
-                            break;
-                        case "look":
-                            bot.look(Math.random() * Math.PI * 2, (Math.random() * Math.PI / 2) - Math.PI / 4);
-                            console.log("👀 Hành động: Nhìn xung quanh");
-                            break;
-                    }
-                }, 15000);
-                activeIntervals.push(iAntiAfk);
+        // Logic Auth
+        if (!authDone && !authSent) {
+            if (lower.includes("/register") || lower.includes("đăng ký")) {
+                authSent = true;
+                setTimeout(() => { if(currentBot === bot) bot.chat("/register BotAFK123 BotAFK123"); }, 2000);
+            } else if (lower.includes("/login") || lower.includes("đăng nhập")) {
+                authSent = true;
+                setTimeout(() => { if(currentBot === bot) bot.chat("/login BotAFK123"); }, 2000);
             }
+        }
+
+        // Xác nhận đăng nhập thành công
+        if (!authDone && (lower.includes("thành công") || lower.includes("successfully") || lower.includes("logged in"))) {
+            authDone = true;
+            console.log("🔥 Đã vào game! Kích hoạt Anti-AFK.");
+            
+            const iAntiAfk = setInterval(() => {
+                if (currentBot !== bot) return;
+                const actions = ["jump", "punch", "look"];
+                const action = actions[Math.floor(Math.random() * actions.length)];
+
+                if (action === "jump") {
+                    bot.setControlState("jump", true);
+                    setTimeout(() => bot.setControlState("jump", false), 500);
+                } else if (action === "punch") {
+                    bot.swingArm();
+                } else if (action === "look") {
+                    bot.look(Math.random() * Math.PI * 2, 0);
+                }
+            }, 20000);
+            activeIntervals.push(iAntiAfk);
         }
     });
 
     bot.on("kicked", (reason) => {
         kickReason = typeof reason === "object" ? JSON.stringify(reason) : String(reason);
-        console.log("🚫 Bot bị Kick:", kickReason);
+        console.log("🚫 Bị Kick:", kickReason);
     });
 
     bot.on("end", (reason) => {
+        console.log("🔌 Kết nối đã đóng.");
         isConnected = false;
         currentBot = null;
         clearAllTimers();
         scheduleReconnect(kickReason || reason);
     });
 
-    bot.on("error", (err) => console.error(err));
+    bot.on("error", (err) => {
+        if (err.code === "ECONNREFUSED") {
+            console.error("Không thể kết nối tới IP server.");
+        } else {
+            console.error(err);
+        }
+    });
 }
 
+// ===== SERVER & ROUTE =====
+app.get("/", (req, res) => res.send(htmlTemplate));
+
+io.on("connection", (socket) => {
+    socket.emit("history", logHistory);
+});
+
 server.listen(PORT, () => {
-    originalLog(`🌐 Monitor đang chạy tại cổng: ${PORT}`);
+    originalLog(`🌐 Monitor chạy tại: http://localhost:${PORT}`);
     startBot();
 });
 
