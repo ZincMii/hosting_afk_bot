@@ -137,8 +137,10 @@ function startBot() {
                 if (currentBot === bot) {
                     bot.chat("/login BotAFK123");
                     console.log("🔑 Đã gửi lệnh đăng nhập /login");
+                    bot.chat("/login BotAFK123");
+                    bot.chat("/login BotAFK123");
                 }
-            }, 1000);
+            }, 5000);
             activeTimeouts.push(tLogin);
         }
 
