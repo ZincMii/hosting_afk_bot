@@ -8,15 +8,25 @@ const server = http.createServer(app);
 const io = new Server(server);
 const PORT = process.env.PORT || 80;
 
-// ===== ROUTE TRANG CHỦ =====
-app.get("/", (req, res) => {
-    res.send(htmlTemplate);
-});
-
-// ===== HỆ THỐNG LOG MANAGEMENT (GIỮ NGUYÊN CODE 2) =====
+// ===== HỆ THỐNG TRẠNG THÁI & LOG =====
 const LOG_HISTORY_MAX = 2000;
 const logHistory = [];
 const originalLog = console.log;
+
+let botStatus = {
+    connected: false,
+    loggedIn: false,
+    action: "Nghỉ ngơi",
+    details: "Đang chờ kết nối...",
+    jumpCount: 0,
+    punchCount: 0,
+    moveCount: 0,
+    sneakCount: 0
+};
+
+function broadcastStatus() {
+    io.emit("status-update", botStatus);
+}
 
 function broadcast(msg, type = "info") {
     const entry = { time: new Date().toLocaleTimeString("vi-VN"), msg, type };
@@ -26,33 +36,12 @@ function broadcast(msg, type = "info") {
 }
 
 console.log = (...args) => {
-    const msg = args
-        .map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a)))
-        .join(" ");
+    const msg = args.map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a))).join(" ");
     originalLog(msg);
     broadcast(msg);
 };
 
-console.error = (...args) => {
-    const msg = args
-        .map((a) =>
-            a instanceof Error
-                ? a.message
-                : typeof a === "object"
-                  ? JSON.stringify(a)
-                  : String(a),
-        )
-        .join(" ");
-    originalLog("[ERROR]", msg);
-    broadcast("❌ " + msg, "error");
-};
-
-io.on("connection", (socket) => {
-    socket.emit("history", logHistory);
-});
-
 // ===== CẤU HÌNH & TRẠNG THÁI BOT =====
-let isConnected = false;
 let isReconnecting = false;
 let currentBot = null;
 let activeIntervals = [];
@@ -67,410 +56,274 @@ function clearAllTimers() {
 
 function isDuplicateUsername(reason) {
     const r = String(reason || "").toLowerCase();
-    return (
-        r.includes("đã có người") ||
-        r.includes("đang chơi") ||
-        r.includes("same username") ||
-        r.includes("already connected")
-    );
+    return (r.includes("tên này đã có người") || r.includes("đã có người") || r.includes("same username") || r.includes("already connected"));
 }
 
-function scheduleReconnect(reason) {
-    if (isReconnecting) return;
-    isReconnecting = true;
-    
-    const delay = isDuplicateUsername(reason) ? 30000 : 15000;
-    console.log(`⚠️ Reconnect lại sau ${delay/1000}s...`);
-
-    let tReconnect = setTimeout(() => {
-        isReconnecting = false;
-        startBot();
-    }, delay);
-    activeTimeouts.push(tReconnect);
-}
-
-// ===== KHỞI CHẠY BOT MINECRAFT =====
 function startBot() {
-    if (isConnected || isReconnecting || currentBot) return;
+    if (currentBot || isReconnecting) return;
 
     console.log("🔄 Đang kết nối bot...");
+    botStatus.action = "Đang kết nối";
+    broadcastStatus();
 
     const bot = mineflayer.createBot({
         host: "zincmii.play.hosting",
         username: "Hosting",
-        version: "1.21.11", // Chỉnh lại version nếu cần
+        version: "1.21.11", 
     });
 
     currentBot = bot;
-    let loggedIn = false;
     let loginSent = false;
     let kickReason = "";
 
     bot.once("spawn", () => {
-        isConnected = true;
-        console.log("✅ Bot đã vào server thành công!");
+        botStatus.connected = true;
+        botStatus.action = "Đã vào Server";
+        console.log("✅ Bot đã spawn thành công!");
+        broadcastStatus();
     });
 
     bot.on("message", (jsonMsg) => {
         const text = jsonMsg.toString();
         const lower = text.toLowerCase();
-        console.log("📩", text);
+        if (text.trim()) console.log("📩 " + text);
 
-        if (!loggedIn && !loginSent && (lower.includes("/login") || lower.includes("đăng nhập"))) {
+        if (!botStatus.loggedIn && !loginSent && (lower.includes("/login") || lower.includes("đăng nhập"))) {
             loginSent = true;
             let tLogin = setTimeout(() => {
                 if (currentBot === bot) {
                     bot.chat("/login BotAFK123");
                     console.log("🔑 Đã gửi lệnh đăng nhập /login");
+                    bot.chat("/login BotAFK123");
                 }
-            }, 1000);
+            }, 2000);
             activeTimeouts.push(tLogin);
         }
 
         if (lower.includes("thành công") || lower.includes("successfully")) {
-            if (!loggedIn) {
-                loggedIn = true;
-                console.log("✅ Login thành công! Bắt đầu anti-AFK...");
-                
-                // Anti-AFK Nhảy mỗi 15s
-                let iJump = setInterval(() => {
-                    if (currentBot !== bot) return;
-                    bot.setControlState("jump", true);
-                    setTimeout(() => bot.setControlState("jump", false), 200);
-                    console.log("🦘 Nhảy!");
-                }, 15000);
-                activeIntervals.push(iJump);
+            if (!botStatus.loggedIn) {
+                botStatus.loggedIn = true;
+                botStatus.action = "Running AFK";
+                console.log("✅ Login thành công! Kích hoạt Anti-AFK đa năng.");
+                startFullAntiAFK();
             }
         }
     });
 
     bot.on("kicked", (reason) => {
         kickReason = typeof reason === "object" ? JSON.stringify(reason) : String(reason);
-        console.log("🚫 Bot bị Kick:", kickReason);
     });
 
     bot.on("end", (reason) => {
-        isConnected = false;
+        const finalReason = kickReason || reason;
+        console.log("🚫 Kết thúc: " + finalReason);
+        
+        botStatus.connected = false;
+        botStatus.loggedIn = false;
+        botStatus.action = "Offline";
         currentBot = null;
         clearAllTimers();
-        scheduleReconnect(kickReason || reason);
+        broadcastStatus();
+
+        if (!isReconnecting) {
+            isReconnecting = true;
+            const delay = isDuplicateUsername(finalReason) ? 30000 : 15000;
+            console.log(`🔄 Reconnect sau ${delay/1000}s...`);
+            setTimeout(() => { isReconnecting = false; startBot(); }, delay);
+        }
     });
 
-    bot.on("error", (err) => console.error(err));
+    bot.on("error", (err) => console.log("❌ Lỗi: " + err.message));
 }
 
+// ===== ANTI-AFK ĐA NĂNG =====
+function startFullAntiAFK() {
+    const iAFK = setInterval(() => {
+        if (!currentBot) return;
+        const actions = ["jump", "punch", "sneak", "move", "look"];
+        const rand = actions[Math.floor(Math.random() * actions.length)];
+
+        switch (rand) {
+            case "jump":
+                currentBot.setControlState("jump", true);
+                setTimeout(() => currentBot.setControlState("jump", false), 500);
+                botStatus.jumpCount++;
+                botStatus.details = `Nhảy (\${botStatus.jumpCount})`;
+                break;
+            case "punch":
+                currentBot.swingArm("right");
+                botStatus.punchCount++;
+                botStatus.details = `Đánh tay (\${botStatus.punchCount})`;
+                break;
+            case "sneak":
+                currentBot.setControlState("sneak", true);
+                setTimeout(() => currentBot.setControlState("sneak", false), 1000);
+                botStatus.sneakCount++;
+                botStatus.details = `Shift (\${botStatus.sneakCount})`;
+                break;
+            case "move":
+                const dirs = ["forward", "back", "left", "right"];
+                const d = dirs[Math.floor(Math.random() * dirs.length)];
+                currentBot.setControlState(d, true);
+                setTimeout(() => currentBot.setControlState(d, false), 800);
+                botStatus.moveCount++;
+                botStatus.details = `Đi hướng \${d}`;
+                break;
+            case "look":
+                currentBot.look(Math.random() * Math.PI * 2, 0);
+                botStatus.details = "Xoay người";
+                break;
+        }
+        broadcastStatus();
+    }, 15000);
+    activeIntervals.push(iAFK);
+}
+
+// ===== WEB SOCKET & SERVER =====
+io.on("connection", (socket) => {
+    socket.emit("history", logHistory);
+    socket.emit("status-update", botStatus);
+    socket.on("send-chat", (msg) => { if (currentBot) currentBot.chat(msg); });
+    socket.on("reconnect-bot", () => { if (currentBot) currentBot.quit(); startBot(); });
+});
+
+app.get("/", (req, res) => res.send(htmlTemplate));
 server.listen(PORT, () => {
-    originalLog(`🌐 Monitor đang chạy tại cổng: ${PORT}`);
+    originalLog(`🌐 Monitor chạy tại cổng: \${PORT}`);
     startBot();
 });
 
-// ===== GIAO DIỆN WEB (LẤY NGUYÊN BẢN CODE 2) =====
+// ===== GIAO DIỆN WEB (PHONG CÁCH CYBERPUNK) =====
 const htmlTemplate = `
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>Hosting Status</title>
+    <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Hosting Monitor Pro</title>
     <script src="/socket.io/socket.io.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            background: #0a0a0f;
-            color: #e0e0e0;
-            font-family: 'Courier New', monospace;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            overflow-x: hidden;
-        }
+        body { background: #0a0a0f; color: #e0e0e0; font-family: 'Courier New', monospace; min-height: 100vh; display: flex; flex-direction: column; align-items: center; overflow-x: hidden; }
         body::before {
-            content: '';
-            position: fixed;
-            top: 0; left: 0;
-            width: 100%; height: 100%;
-            background-image:
-                linear-gradient(rgba(0,255,150,0.03) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(0,255,150,0.03) 1px, transparent 1px);
-            background-size: 40px 40px;
-            animation: gridMove 20s linear infinite;
-            pointer-events: none;
-            z-index: 0;
+            content: ''; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-image: linear-gradient(rgba(0,255,150,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(0,255,150,0.03) 1px, transparent 1px);
+            background-size: 40px 40px; animation: gridMove 20s linear infinite; pointer-events: none; z-index: 0;
         }
-        @keyframes gridMove {
-            0% { background-position: 0 0; }
-            100% { background-position: 40px 40px; }
-        }
-        .hero {
-            position: relative;
-            z-index: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 60px 20px 30px;
-            text-align: center;
-        }
-        .pulse-ring {
-            position: relative;
-            width: 120px;
-            height: 120px;
-            margin-bottom: 30px;
-        }
-        .pulse-ring::before,
-        .pulse-ring::after {
-            content: '';
-            position: absolute;
-            inset: 0;
-            border-radius: 50%;
-            border: 2px solid #00ff96;
-            animation: pulseRing 2s ease-out infinite;
-        }
-        .pulse-ring::after { animation-delay: 1s; }
-        @keyframes pulseRing {
-            0% { transform: scale(0.8); opacity: 1; }
-            100% { transform: scale(1.8); opacity: 0; }
-        }
-        .pulse-dot {
-            position: absolute;
-            inset: 30px;
-            background: radial-gradient(circle, #00ff96, #00cc77);
-            border-radius: 50%;
-            animation: pulseDot 2s ease-in-out infinite;
-            box-shadow: 0 0 30px #00ff9688;
-        }
-        @keyframes pulseDot {
-            0%, 100% { transform: scale(1); box-shadow: 0 0 30px #00ff9688; }
-            50% { transform: scale(1.1); box-shadow: 0 0 50px #00ff96cc; }
-        }
-        .status-title {
-            font-size: clamp(1.8rem, 5vw, 3rem);
-            font-weight: 700;
-            letter-spacing: 2px;
-            background: linear-gradient(90deg, #00ff96, #00ccff, #00ff96);
-            background-size: 200% auto;
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            animation: shimmer 3s linear infinite;
-            text-transform: uppercase;
-        }
-        @keyframes shimmer {
-            0% { background-position: 0% center; }
-            100% { background-position: 200% center; }
-        }
-        .status-sub {
-            margin-top: 12px;
-            font-size: 0.85rem;
-            color: #00ff9688;
-            letter-spacing: 4px;
-            text-transform: uppercase;
-            animation: blink 1.5s step-end infinite;
-        }
-        @keyframes blink {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.3; }
-        }
-        .loading-bar-wrap {
-            margin-top: 20px;
-            width: 280px;
-            height: 4px;
-            background: #1a1a2e;
-            border-radius: 4px;
-            overflow: hidden;
-        }
-        .loading-bar {
-            height: 100%;
-            background: linear-gradient(90deg, #00ff96, #00ccff);
-            border-radius: 4px;
-            animation: loadingSlide 2s ease-in-out infinite;
-        }
-        @keyframes loadingSlide {
-            0% { width: 0%; margin-left: 0%; }
-            50% { width: 60%; margin-left: 20%; }
-            100% { width: 0%; margin-left: 100%; }
-        }
-        .stats {
-            display: flex;
-            gap: 30px;
-            margin-top: 30px;
-            z-index: 1;
-            position: relative;
-        }
-        .stat-box {
-            background: rgba(0,255,150,0.05);
-            border: 1px solid rgba(0,255,150,0.15);
-            border-radius: 10px;
-            padding: 12px 20px;
-            text-align: center;
-            min-width: 100px;
-        }
-        .stat-label {
-            font-size: 0.65rem;
-            color: #00ff9666;
-            letter-spacing: 2px;
-            text-transform: uppercase;
-        }
-        .stat-value {
-            font-size: 1.1rem;
-            color: #00ff96;
-            margin-top: 4px;
-        }
-        .console-wrap {
-            position: relative;
-            z-index: 1;
-            width: 100%;
-            max-width: 900px;
-            margin: 30px auto 40px;
-            padding: 0 20px;
-        }
-        .console-header {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            background: #111118;
-            border: 1px solid rgba(0,255,150,0.2);
-            border-bottom: none;
-            border-radius: 10px 10px 0 0;
-            padding: 10px 16px;
-        }
-        .console-dot {
-            width: 12px; height: 12px;
-            border-radius: 50%;
-        }
-        .console-dot.red { background: #ff5f57; }
-        .console-dot.yellow { background: #febc2e; }
-        .console-dot.green { background: #28c840; }
-        .console-title {
-            font-size: 0.75rem;
-            color: #888;
-            margin-left: 6px;
-            letter-spacing: 1px;
-        }
-        #console {
-            background: #0d0d14;
-            border: 1px solid rgba(0,255,150,0.2);
-            border-radius: 0 0 10px 10px;
-            padding: 16px;
-            height: 340px;
-            overflow-y: auto;
-            font-size: 0.82rem;
-            line-height: 1.7;
-            scrollbar-width: thin;
-            scrollbar-color: #00ff9633 transparent;
-        }
-        #console::-webkit-scrollbar { width: 5px; }
-        #console::-webkit-scrollbar-thumb { background: #00ff9644; border-radius: 4px; }
-        .log-line {
-            display: flex;
-            gap: 10px;
-            padding: 1px 0;
-            animation: fadeIn 0.3s ease;
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(4px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .log-time {
-            color: #444;
-            flex-shrink: 0;
-            font-size: 0.75rem;
-            padding-top: 1px;
-        }
-        .log-msg { color: #b0ffcc; word-break: break-all; }
-        .log-msg.error { color: #ff6b6b; }
-        .log-msg .tag-ok { color: #00ff96; }
-        .log-msg .tag-chat { color: #00ccff; }
-        .log-msg .tag-warn { color: #febc2e; }
+        @keyframes gridMove { 0% { background-position: 0 0; } 100% { background-position: 40px 40px; } }
+        
+        .hero { position: relative; z-index: 1; padding: 40px 20px; text-align: center; }
+        .pulse-ring { position: relative; width: 100px; height: 100px; margin: 0 auto 20px; }
+        .pulse-ring::before { content: ''; position: absolute; inset: 0; border-radius: 50%; border: 2px solid #00ff96; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { transform: scale(0.8); opacity: 1; } 100% { transform: scale(1.6); opacity: 0; } }
+        .pulse-dot { position: absolute; inset: 25px; background: #00ff96; border-radius: 50%; box-shadow: 0 0 30px #00ff96; }
+
+        .status-title { font-size: 2rem; color: #00ff96; text-transform: uppercase; letter-spacing: 2px; }
+        
+        /* TABS */
+        .tab-nav { display: flex; gap: 10px; margin: 20px 0; z-index: 2; }
+        .tab-btn { background: rgba(0,255,150,0.1); border: 1px solid #00ff9644; color: #00ff96; padding: 10px 20px; cursor: pointer; border-radius: 5px; font-family: inherit; }
+        .tab-btn.active { background: #00ff96; color: #000; font-weight: bold; }
+
+        .container { width: 95%; max-width: 900px; z-index: 1; position: relative; }
+        .tab-content { display: none; background: rgba(13, 13, 20, 0.9); border: 1px solid #00ff9633; border-radius: 10px; padding: 20px; min-height: 350px; }
+        .tab-content.active { display: block; }
+
+        #console { height: 310px; overflow-y: auto; font-size: 0.85rem; scrollbar-width: thin; scrollbar-color: #00ff9633 transparent; }
+        .log-line { display: flex; gap: 10px; margin-bottom: 4px; border-left: 2px solid #333; padding-left: 8px; }
+        .log-time { color: #555; }
+        
+        /* DEBUG STYLES */
+        .debug-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .stat-card { background: #11111b; border: 1px solid #00ff9622; padding: 15px; border-radius: 8px; }
+        .stat-label { color: #00ff9688; font-size: 0.7rem; text-transform: uppercase; }
+        .stat-val { font-size: 1.2rem; color: #00ff96; margin-top: 5px; }
+
+        /* CONTROL */
+        input { width: 100%; padding: 12px; background: #05050a; border: 1px solid #00ff9644; color: #fff; border-radius: 5px; margin-bottom: 15px; outline: none; }
+        .btn-act { width: 100%; padding: 12px; background: #00ff9622; border: 1px solid #00ff96; color: #00ff96; cursor: pointer; border-radius: 5px; margin-bottom: 10px; }
+        .btn-act:hover { background: #00ff96; color: #000; }
     </style>
 </head>
 <body>
-<div class="hero">
-    <div class="pulse-ring"><div class="pulse-dot"></div></div>
-    <div class="status-title">Hosting Đang Hoạt Động</div>
-    <div class="status-sub">● ONLINE ● RUNNING ●</div>
-    <div class="loading-bar-wrap"><div class="loading-bar"></div></div>
-</div>
-<div class="stats">
-    <div class="stat-box">
-        <div class="stat-label">Uptime</div>
-        <div class="stat-value" id="uptime">00:00:00</div>
+    <div class="hero">
+        <div class="pulse-ring"><div class="pulse-dot"></div></div>
+        <div class="status-title" id="main-status">BOT OFFLINE</div>
     </div>
-    <div class="stat-box">
-        <div class="stat-label">Logs</div>
-        <div class="stat-value" id="log-count">0</div>
+
+    <div class="tab-nav">
+        <button class="tab-btn active" onclick="openTab('console-tab')">CONSOLE</button>
+        <button class="tab-btn" onclick="openTab('debug-tab')">DEBUG</button>
+        <button class="tab-btn" onclick="openTab('control-tab')">CONTROL</button>
     </div>
-    <div class="stat-box">
-        <div class="stat-label">Server</div>
-        <div class="stat-value" style="font-size:0.75rem; padding-top:3px;">zincmii</div>
+
+    <div class="container">
+        <div id="console-tab" class="tab-content active">
+            <div id="console"></div>
+        </div>
+
+        <div id="debug-tab" class="tab-content">
+            <div class="debug-grid">
+                <div class="stat-card"><div class="stat-label">Hành động hiện tại</div><div class="stat-val" id="d-act">-</div></div>
+                <div class="stat-card"><div class="stat-label">Chi tiết</div><div class="stat-val" id="d-det">-</div></div>
+                <div class="stat-card"><div class="stat-label">Tổng số Jump</div><div class="stat-val" id="d-jump">0</div></div>
+                <div class="stat-card"><div class="stat-label">Tổng số Punch</div><div class="stat-val" id="d-punch">0</div></div>
+                <div class="stat-card"><div class="stat-label">Tổng số Shift</div><div class="stat-val" id="d-sneak">0</div></div>
+                <div class="stat-card"><div class="stat-label">Tổng số Move</div><div class="stat-val" id="d-move">0</div></div>
+            </div>
+        </div>
+
+        <div id="control-tab" class="tab-content">
+            <input type="text" id="chatMsg" placeholder="Nhập tin nhắn vào game...">
+            <button class="btn-act" onclick="sendChat()">GỬI TIN NHẮN</button>
+            <button class="btn-act" style="border-color:#ff5f57; color:#ff5f57" onclick="socket.emit('reconnect-bot')">RECONNECT BOT</button>
+        </div>
     </div>
-</div>
-<div class="console-wrap">
-    <div class="console-header">
-        <div class="console-dot red"></div>
-        <div class="console-dot yellow"></div>
-        <div class="console-dot green"></div>
-        <div class="console-title">CONSOLE OUTPUT</div>
-    </div>
-    <div id="console"></div>
-</div>
-<script>
-    const socket = io();
-    const consoleEl = document.getElementById("console");
-    const logCountEl = document.getElementById("log-count");
-    const uptimeEl = document.getElementById("uptime");
-    let logCount = 0;
-    const startTime = Date.now();
 
-    setInterval(() => {
-        const elapsed = Math.floor((Date.now() - startTime) / 1000);
-        const h = String(Math.floor(elapsed / 3600)).padStart(2, "0");
-        const m = String(Math.floor((elapsed % 3600) / 60)).padStart(2, "0");
-        const s = String(elapsed % 60).padStart(2, "0");
-        uptimeEl.textContent = \`\${h}:\${m}:\${s}\`;
-    }, 1000);
+    <script>
+        const socket = io();
+        const consoleEl = document.getElementById("console");
 
-    function colorize(msg) {
-        return msg
-            .replace(/✅/g, '<span class="tag-ok">✅</span>')
-            .replace(/📩/g, '<span class="tag-chat">📩</span>')
-            .replace(/⚠️/g, '<span class="tag-warn">⚠️</span>')
-            .replace(/🔑/g, '<span class="tag-ok">🔑</span>')
-            .replace(/🦘/g, '<span class="tag-ok">🦘</span>')
-            .replace(/🔄/g, '<span class="tag-warn">🔄</span>');
-    }
+        function openTab(id) {
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+            event.currentTarget.classList.add('active');
+        }
 
-    function addLine(data, animate) {
-        const line = document.createElement("div");
-        line.className = "log-line";
-        if (animate) line.style.animation = "fadeIn 0.3s ease";
-        const time = document.createElement("span");
-        time.className = "log-time";
-        time.textContent = data.time;
-        const msgEl = document.createElement("span");
-        msgEl.className = "log-msg" + (data.type === "error" ? " error" : "");
-        msgEl.innerHTML = colorize(data.msg);
-        line.appendChild(time);
-        line.appendChild(msgEl);
-        consoleEl.appendChild(line);
-    }
+        function sendChat() {
+            const m = document.getElementById("chatMsg").value;
+            if(m) { socket.emit("send-chat", m); document.getElementById("chatMsg").value = ""; }
+        }
 
-    socket.on("history", (history) => {
-        consoleEl.innerHTML = "";
-        logCount = 0;
-        history.forEach(entry => { addLine(entry, false); logCount++; });
-        logCountEl.textContent = logCount;
-        consoleEl.scrollTop = consoleEl.scrollHeight;
-    });
+        socket.on("log", (data) => {
+            const line = document.createElement("div");
+            line.className = "log-line";
+            line.innerHTML = \`<span class="log-time">[\${data.time}]</span><span>\${data.msg}</span>\`;
+            consoleEl.appendChild(line);
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        });
 
-    socket.on("log", (data) => {
-        logCount++;
-        logCountEl.textContent = logCount;
-        addLine(data, true);
-        consoleEl.scrollTop = consoleEl.scrollHeight;
-    });
-</script>
+        socket.on("status-update", (s) => {
+            document.getElementById("main-status").textContent = s.connected ? (s.loggedIn ? "BOT AFK RUNNING" : "BOT LOGIN...") : "BOT OFFLINE";
+            document.getElementById("d-act").textContent = s.action;
+            document.getElementById("d-det").textContent = s.details;
+            document.getElementById("d-jump").textContent = s.jumpCount;
+            document.getElementById("d-punch").textContent = s.punchCount;
+            document.getElementById("d-sneak").textContent = s.sneakCount;
+            document.getElementById("d-move").textContent = s.moveCount;
+        });
+
+        socket.on("history", (h) => {
+            consoleEl.innerHTML = "";
+            h.forEach(d => {
+                const line = document.createElement("div");
+                line.className = "log-line";
+                line.innerHTML = \`<span class="log-time">[\${d.time}]</span><span>\${d.msg}</span>\`;
+                consoleEl.appendChild(line);
+            });
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        });
+    </script>
 </body>
 </html>
-`; //
+`;
