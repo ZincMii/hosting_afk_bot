@@ -99,13 +99,13 @@ function startBot() {
 
     const bot = mineflayer.createBot({
         host: "zincmii.play.hosting",
-        username: "HostingV2",
+        username: "Hosting",
         version: "1.21.11", 
     });
 
     currentBot = bot;
-    let loggedIn = false;
-    let loginSent = false;
+    let authDone = false; // Đã xong phần đăng nhập hoặc đăng ký
+    let authSent = false;
     let kickReason = "";
 
     bot.once("spawn", () => {
@@ -118,11 +118,23 @@ function startBot() {
         const lower = text.toLowerCase();
         console.log("📩", text);
 
-        if (!loggedIn && !loginSent && (lower.includes("/login") || lower.includes("đăng nhập"))) {
-            loginSent = true;
-            let tLogin = setTimeout(() => {
+        // --- Logic Tự động Đăng ký (Register) ---
+        if (!authDone && !authSent && (lower.includes("/register") || lower.includes("đăng ký"))) {
+            authSent = true;
+            let tReg = setTimeout(() => {
                 if (currentBot === bot) {
                     bot.chat("/register BotAFK123 BotAFK123");
+                    console.log("🔑 Đã gửi lệnh đăng ký /register");
+                }
+            }, 1500);
+            activeTimeouts.push(tReg);
+        }
+
+        // --- Logic Tự động Đăng nhập (Login) ---
+        if (!authDone && !authSent && (lower.includes("/login") || lower.includes("đăng nhập"))) {
+            authSent = true;
+            let tLogin = setTimeout(() => {
+                if (currentBot === bot) {
                     bot.chat("/login BotAFK123");
                     console.log("🔑 Đã gửi lệnh đăng nhập /login");
                 }
@@ -130,12 +142,12 @@ function startBot() {
             activeTimeouts.push(tLogin);
         }
 
-        if (lower.includes("thành công") || lower.includes("successfully")) {
-            if (!loggedIn) {
-                loggedIn = true;
-                console.log("✅ Login thành công! Bắt đầu chuỗi Anti-AFK tổng hợp...");
+        // --- Xác nhận vào game thành công ---
+        if (lower.includes("thành công") || lower.includes("successfully") || lower.includes("logged in")) {
+            if (!authDone) {
+                authDone = true;
+                console.log("✅ Xác thực thành công! Bắt đầu chuỗi Anti-AFK...");
                 
-                // Anti-AFK đa dạng hành động mỗi 15s
                 let iAntiAfk = setInterval(() => {
                     if (currentBot !== bot) return;
 
@@ -164,9 +176,7 @@ function startBot() {
                             console.log(`🏃 Hành động: Di chuyển (${dir})`);
                             break;
                         case "look":
-                            const yaw = (Math.random() * Math.PI * 2);
-                            const pitch = (Math.random() * Math.PI / 2) - Math.PI / 4;
-                            bot.look(yaw, pitch);
+                            bot.look(Math.random() * Math.PI * 2, (Math.random() * Math.PI / 2) - Math.PI / 4);
                             console.log("👀 Hành động: Nhìn xung quanh");
                             break;
                     }
@@ -196,250 +206,315 @@ server.listen(PORT, () => {
     startBot();
 });
 
-// ===== GIAO DIỆN WEB =====
-// ===== GIAO DIỆN WEB TỐI ƯU HÓA (MINIFIED) =====
-// ===== GIAO DIỆN WEB NÂNG CẤP (CYBERPUNK STYLE) =====
+// ===== GIAO DIỆN WEB (GIỮ NGUYÊN NHƯ CŨ) =====
 const htmlTemplate = `
 <!DOCTYPE html>
 <html lang="vi">
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>Gemini Bot Control Panel</title>
+    <title>Hosting Status</title>
     <script src="/socket.io/socket.io.js"></script>
     <style>
-        :root {
-            --primary: #00ff96;
-            --secondary: #00ccff;
-            --bg-dark: #050508;
-            --panel-bg: rgba(10, 10, 15, 0.9);
-            --border: rgba(0, 255, 150, 0.3);
-        }
-
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        
         body {
-            background: var(--bg-dark);
+            background: #0a0a0f;
             color: #e0e0e0;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Courier New', monospace;
             min-height: 100vh;
             display: flex;
             flex-direction: column;
             align-items: center;
             overflow-x: hidden;
         }
-
-        /* Hiệu ứng nền lưới */
         body::before {
             content: '';
             position: fixed;
             top: 0; left: 0;
             width: 100%; height: 100%;
-            background-image: 
-                linear-gradient(var(--border) 1px, transparent 1px),
-                linear-gradient(90deg, var(--border) 1px, transparent 1px);
-            background-size: 50px 50px;
-            mask-image: radial-gradient(circle, black, transparent 80%);
+            background-image:
+                linear-gradient(rgba(0,255,150,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,255,150,0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
             animation: gridMove 20s linear infinite;
             pointer-events: none;
             z-index: 0;
         }
-
         @keyframes gridMove {
             0% { background-position: 0 0; }
-            100% { background-position: 50px 50px; }
+            100% { background-position: 40px 40px; }
         }
-
-        .container {
+        .hero {
             position: relative;
             z-index: 1;
-            width: 95%;
-            max-width: 1000px;
-            margin: 40px auto;
-        }
-
-        /* Header & Status */
-        .header {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px 30px;
             text-align: center;
-            margin-bottom: 40px;
         }
-
-        .status-orb {
-            width: 100px;
-            height: 100px;
-            margin: 0 auto 20px;
-            background: radial-gradient(circle, var(--primary), transparent 70%);
-            border-radius: 50%;
+        .pulse-ring {
             position: relative;
-            box-shadow: 0 0 30px var(--primary);
-            animation: pulse 2s infinite alternate;
-        }
-
-        @keyframes pulse {
-            from { transform: scale(1); opacity: 0.8; }
-            to { transform: scale(1.1); opacity: 1; box-shadow: 0 0 50px var(--primary); }
-        }
-
-        h1 {
-            font-size: 2.5rem;
-            letter-spacing: 5px;
-            text-transform: uppercase;
-            background: linear-gradient(90deg, var(--primary), var(--secondary));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin-bottom: 10px;
-        }
-
-        /* Stats Grid */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
+            width: 120px;
+            height: 120px;
             margin-bottom: 30px;
         }
-
-        .stat-card {
-            background: var(--panel-bg);
-            border: 1px solid var(--border);
-            padding: 20px;
-            border-radius: 12px;
-            text-align: center;
-            backdrop-filter: blur(10px);
-            transition: 0.3s;
+        .pulse-ring::before,
+        .pulse-ring::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            border: 2px solid #00ff96;
+            animation: pulseRing 2s ease-out infinite;
         }
-
-        .stat-card:hover { border-color: var(--primary); transform: translateY(-5px); }
-
-        .stat-label { font-size: 0.7rem; text-transform: uppercase; color: #888; letter-spacing: 2px; }
-        .stat-value { font-size: 1.5rem; color: var(--primary); font-weight: bold; margin-top: 5px; }
-
-        /* Console Area */
-        .console-box {
-            background: var(--panel-bg);
-            border: 1px solid var(--border);
-            border-radius: 15px;
+        .pulse-ring::after { animation-delay: 1s; }
+        @keyframes pulseRing {
+            0% { transform: scale(0.8); opacity: 1; }
+            100% { transform: scale(1.8); opacity: 0; }
+        }
+        .pulse-dot {
+            position: absolute;
+            inset: 30px;
+            background: radial-gradient(circle, #00ff96, #00cc77);
+            border-radius: 50%;
+            animation: pulseDot 2s ease-in-out infinite;
+            box-shadow: 0 0 30px #00ff9688;
+        }
+        @keyframes pulseDot {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 30px #00ff9688; }
+            50% { transform: scale(1.1); box-shadow: 0 0 50px #00ff96cc; }
+        }
+        .status-title {
+            font-size: clamp(1.8rem, 5vw, 3rem);
+            font-weight: 700;
+            letter-spacing: 2px;
+            background: linear-gradient(90deg, #00ff96, #00ccff, #00ff96);
+            background-size: 200% auto;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            animation: shimmer 3s linear infinite;
+            text-transform: uppercase;
+        }
+        @keyframes shimmer {
+            0% { background-position: 0% center; }
+            100% { background-position: 200% center; }
+        }
+        .status-sub {
+            margin-top: 12px;
+            font-size: 0.85rem;
+            color: #00ff9688;
+            letter-spacing: 4px;
+            text-transform: uppercase;
+            animation: blink 1.5s step-end infinite;
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        .loading-bar-wrap {
+            margin-top: 20px;
+            width: 280px;
+            height: 4px;
+            background: #1a1a2e;
+            border-radius: 4px;
             overflow: hidden;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
         }
-
-        .console-header {
-            background: rgba(255,255,255,0.05);
-            padding: 12px 20px;
+        .loading-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #00ff96, #00ccff);
+            border-radius: 4px;
+            animation: loadingSlide 2s ease-in-out infinite;
+        }
+        @keyframes loadingSlide {
+            0% { width: 0%; margin-left: 0%; }
+            50% { width: 60%; margin-left: 20%; }
+            100% { width: 0%; margin-left: 100%; }
+        }
+        .stats {
             display: flex;
-            justify-content: space-between;
+            gap: 30px;
+            margin-top: 30px;
+            z-index: 1;
+            position: relative;
+        }
+        .stat-box {
+            background: rgba(0,255,150,0.05);
+            border: 1px solid rgba(0,255,150,0.15);
+            border-radius: 10px;
+            padding: 12px 20px;
+            text-align: center;
+            min-width: 100px;
+        }
+        .stat-label {
+            font-size: 0.65rem;
+            color: #00ff9666;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+        .stat-value {
+            font-size: 1.1rem;
+            color: #00ff96;
+            margin-top: 4px;
+        }
+        .console-wrap {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            max-width: 900px;
+            margin: 30px auto 40px;
+            padding: 0 20px;
+        }
+        .console-header {
+            display: flex;
             align-items: center;
-            border-bottom: 1px solid var(--border);
+            gap: 10px;
+            background: #111118;
+            border: 1px solid rgba(0,255,150,0.2);
+            border-bottom: none;
+            border-radius: 10px 10px 0 0;
+            padding: 10px 16px;
         }
-
-        .dots { display: flex; gap: 8px; }
-        .dot { width: 12px; height: 12px; border-radius: 50%; }
-        .red { background: #ff5f57; } .yellow { background: #febc2e; } .green { background: #28c840; }
-
+        .console-dot {
+            width: 12px; height: 12px;
+            border-radius: 50%;
+        }
+        .console-dot.red { background: #ff5f57; }
+        .console-dot.yellow { background: #febc2e; }
+        .console-dot.green { background: #28c840; }
+        .console-title {
+            font-size: 0.75rem;
+            color: #888;
+            margin-left: 6px;
+            letter-spacing: 1px;
+        }
         #console {
-            height: 450px;
-            padding: 20px;
+            background: #0d0d14;
+            border: 1px solid rgba(0,255,150,0.2);
+            border-radius: 0 0 10px 10px;
+            padding: 16px;
+            height: 340px;
             overflow-y: auto;
-            font-family: 'Consolas', monospace;
-            font-size: 0.9rem;
-            line-height: 1.6;
+            font-size: 0.82rem;
+            line-height: 1.7;
             scrollbar-width: thin;
+            scrollbar-color: #00ff9633 transparent;
         }
-
-        .log-entry { margin-bottom: 8px; display: flex; gap: 12px; border-left: 2px solid transparent; padding-left: 10px; }
-        .log-entry.new { border-left-color: var(--primary); background: rgba(0,255,150,0.05); }
-        .log-time { color: #555; min-width: 80px; }
-        .log-text { color: #d0d0d0; }
-        .error { color: #ff6b6b !important; }
-        .highlight { color: var(--primary); font-weight: bold; }
-
-        /* Scrollbar */
-        #console::-webkit-scrollbar { width: 6px; }
-        #console::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+        #console::-webkit-scrollbar { width: 5px; }
+        #console::-webkit-scrollbar-thumb { background: #00ff9644; border-radius: 4px; }
+        .log-line {
+            display: flex;
+            gap: 10px;
+            padding: 1px 0;
+            animation: fadeIn 0.3s ease;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .log-time {
+            color: #444;
+            flex-shrink: 0;
+            font-size: 0.75rem;
+            padding-top: 1px;
+        }
+        .log-msg { color: #b0ffcc; word-break: break-all; }
+        .log-msg.error { color: #ff6b6b; }
+        .log-msg .tag-ok { color: #00ff96; }
+        .log-msg .tag-chat { color: #00ccff; }
+        .log-msg .tag-warn { color: #febc2e; }
     </style>
 </head>
 <body>
-
-<div class="container">
-    <div class="header">
-        <div class="status-orb"></div>
-        <h1>Bot System</h1>
-        <div style="color: var(--secondary); letter-spacing: 3px;">CONNECTED TO ZINCMII</div>
+<div class="hero">
+    <div class="pulse-ring"><div class="pulse-dot"></div></div>
+    <div class="status-title">Hosting Đang Hoạt Động</div>
+    <div class="status-sub">● ONLINE ● RUNNING ●</div>
+    <div class="loading-bar-wrap"><div class="loading-bar"></div></div>
+</div>
+<div class="stats">
+    <div class="stat-box">
+        <div class="stat-label">Uptime</div>
+        <div class="stat-value" id="uptime">00:00:00</div>
     </div>
-
-    <div class="stats-grid">
-        <div class="stat-card">
-            <div class="stat-label">Thời gian chạy</div>
-            <div id="uptime" class="stat-value">00:00:00</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Số dòng nhật ký</div>
-            <div id="log-count" class="stat-value">0</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Phiên bản</div>
-            <div class="stat-value">1.21.11</div>
-        </div>
+    <div class="stat-box">
+        <div class="stat-label">Logs</div>
+        <div class="stat-value" id="log-count">0</div>
     </div>
-
-    <div class="console-box">
-        <div class="console-header">
-            <div class="dots">
-                <div class="dot red"></div>
-                <div class="dot yellow"></div>
-                <div class="dot green"></div>
-            </div>
-            <span style="font-size: 0.7rem; color: #666;">TERMINAL OUTPUT - v2.0</span>
-        </div>
-        <div id="console"></div>
+    <div class="stat-box">
+        <div class="stat-label">Server</div>
+        <div class="stat-value" style="font-size:0.75rem; padding-top:3px;">zincmii</div>
     </div>
 </div>
-
+<div class="console-wrap">
+    <div class="console-header">
+        <div class="console-dot red"></div>
+        <div class="console-dot yellow"></div>
+        <div class="console-dot green"></div>
+        <div class="console-title">CONSOLE OUTPUT</div>
+    </div>
+    <div id="console"></div>
+</div>
 <script>
     const socket = io();
     const consoleEl = document.getElementById("console");
     const logCountEl = document.getElementById("log-count");
     const uptimeEl = document.getElementById("uptime");
+    let logCount = 0;
     const startTime = Date.now();
 
-    function updateUptime() {
-        const diff = Math.floor((Date.now() - startTime) / 1000);
-        const h = String(Math.floor(diff / 3600)).padStart(2, '0');
-        const m = String(Math.floor((diff % 3600) / 60)).padStart(2, '0');
-        const s = String(diff % 60).padStart(2, '0');
+    setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const h = String(Math.floor(elapsed / 3600)).padStart(2, "0");
+        const m = String(Math.floor((elapsed % 3600) / 60)).padStart(2, "0");
+        const s = String(elapsed % 60).padStart(2, "0");
         uptimeEl.textContent = \`\${h}:\${m}:\${s}\`;
-    }
-    setInterval(updateUptime, 1000);
+    }, 1000);
 
-    function formatMsg(msg) {
+    function colorize(msg) {
         return msg
-            .replace(/(✅|🔑|🦘|🥊|👀|🏃|👣)/g, '<span class="highlight">$1</span>')
-            .replace(/ERROR/g, '<span class="error">ERROR</span>');
+            .replace(/✅/g, '<span class="tag-ok">✅</span>')
+            .replace(/📩/g, '<span class="tag-chat">📩</span>')
+            .replace(/⚠️/g, '<span class="tag-warn">⚠️</span>')
+            .replace(/🔑/g, '<span class="tag-ok">🔑</span>')
+            .replace(/🦘/g, '<span class="tag-ok">🦘</span>')
+            .replace(/🥊/g, '<span class="tag-ok">🥊</span>')
+            .replace(/👀/g, '<span class="tag-ok">👀</span>')
+            .replace(/🏃/g, '<span class="tag-ok">🏃</span>')
+            .replace(/👣/g, '<span class="tag-ok">👣</span>')
+            .replace(/🔄/g, '<span class="tag-warn">🔄</span>');
     }
 
-    function addLog(data, isNew = false) {
-        const div = document.createElement("div");
-        div.className = "log-entry" + (isNew ? " new" : "");
-        div.innerHTML = \`
-            <span class="log-time">[\${data.time}]</span>
-            <span class="log-text \${data.type === 'error' ? 'error' : ''}">\${formatMsg(data.msg)}</span>
-        \`;
-        consoleEl.appendChild(div);
-        consoleEl.scrollTop = consoleEl.scrollHeight;
-        
-        if (isNew) {
-            setTimeout(() => div.classList.remove("new"), 2000);
-        }
+    function addLine(data, animate) {
+        const line = document.createElement("div");
+        line.className = "log-line";
+        if (animate) line.style.animation = "fadeIn 0.3s ease";
+        const time = document.createElement("span");
+        time.className = "log-time";
+        time.textContent = data.time;
+        const msgEl = document.createElement("span");
+        msgEl.className = "log-msg" + (data.type === "error" ? " error" : "");
+        msgEl.innerHTML = colorize(data.msg);
+        line.appendChild(time);
+        line.appendChild(msgEl);
+        consoleEl.appendChild(line);
     }
 
     socket.on("history", (history) => {
         consoleEl.innerHTML = "";
-        history.forEach(item => addLog(item));
-        logCountEl.textContent = history.length;
+        logCount = 0;
+        history.forEach(entry => { addLine(entry, false); logCount++; });
+        logCountEl.textContent = logCount;
+        consoleEl.scrollTop = consoleEl.scrollHeight;
     });
 
     socket.on("log", (data) => {
-        addLog(data, true);
-        logCountEl.textContent = parseInt(logCountEl.textContent) + 1;
+        logCount++;
+        logCountEl.textContent = logCount;
+        addLine(data, true);
+        consoleEl.scrollTop = consoleEl.scrollHeight;
     });
 </script>
 </body>
