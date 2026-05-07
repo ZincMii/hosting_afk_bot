@@ -99,7 +99,7 @@ function startBot() {
 
     const bot = mineflayer.createBot({
         host: "zincmii.play.hosting",
-        username: "Hosting",
+        username: "HostingV2",
         version: "1.21.11", 
     });
 
@@ -122,6 +122,7 @@ function startBot() {
             loginSent = true;
             let tLogin = setTimeout(() => {
                 if (currentBot === bot) {
+                    bot.chat("/register BotAFK123 BotAFK123");
                     bot.chat("/login BotAFK123");
                     console.log("🔑 Đã gửi lệnh đăng nhập /login");
                 }
