@@ -9,14 +9,31 @@ const io = new Server(server);
 
 const PORT = process.env.PORT || 80;
 
-// ===== HỆ THỐNG LOG =====
-const LOG_HISTORY_MAX = 1000;
+// ===== LOG SYSTEM =====
+const LOG_HISTORY_MAX = 2000;
 const logHistory = [];
 
 const originalLog = console.log;
 const originalError = console.error;
 
+function formatLog(args) {
+    return args
+        .map(a => {
+            if (a instanceof Error) return a.stack || a.message;
+            if (typeof a === "object") {
+                try {
+                    return JSON.stringify(a);
+                } catch {
+                    return "[Circular]";
+                }
+            }
+            return String(a);
+        })
+        .join(" ");
+}
+
 function broadcast(msg, type = "info") {
+
     const entry = {
         time: new Date().toLocaleTimeString("vi-VN"),
         msg,
@@ -33,13 +50,8 @@ function broadcast(msg, type = "info") {
 }
 
 console.log = (...args) => {
-    const msg = args
-        .map(a =>
-            typeof a === "object"
-                ? JSON.stringify(a)
-                : String(a)
-        )
-        .join(" ");
+
+    const msg = formatLog(args);
 
     originalLog(msg);
 
@@ -47,32 +59,36 @@ console.log = (...args) => {
 };
 
 console.error = (...args) => {
-    const msg = args
-        .map(a =>
-            a instanceof Error
-                ? a.message
-                : typeof a === "object"
-                ? JSON.stringify(a)
-                : String(a)
-        )
-        .join(" ");
 
-    originalError("[ERROR]", msg);
+    const msg = formatLog(args);
+
+    originalError(msg);
 
     broadcast("❌ " + msg, "error");
 };
 
-// ===== TRẠNG THÁI =====
+process.on("uncaughtException", err => {
+    console.error("UNCAUGHT:", err);
+});
+
+process.on("unhandledRejection", err => {
+    console.error("UNHANDLED:", err);
+});
+
+// ===== BOT STATUS =====
 let currentBot = null;
+
 let isConnected = false;
 let isReconnecting = false;
+
 let reconnectCount = 0;
 
 let activeIntervals = [];
 let activeTimeouts = [];
 
-// ===== CLEAR TIMER =====
+// ===== TIMER MANAGER =====
 function clearAllTimers() {
+
     activeIntervals.forEach(clearInterval);
     activeTimeouts.forEach(clearTimeout);
 
@@ -80,15 +96,17 @@ function clearAllTimers() {
     activeTimeouts = [];
 }
 
-// ===== CHECK SAME USER =====
+// ===== SAME USERNAME =====
 function isDuplicateUsername(reason) {
+
     const r = String(reason || "").toLowerCase();
 
     return (
         r.includes("already connected") ||
         r.includes("same username") ||
+        r.includes("duplicate login") ||
         r.includes("đã có người") ||
-        r.includes("duplicate login")
+        r.includes("đăng nhập ở nơi khác")
     );
 }
 
@@ -109,7 +127,9 @@ function scheduleReconnect(reason) {
         `⚠️ Reconnect lần ${reconnectCount} sau ${delay / 1000}s`
     );
 
-    const t = setTimeout(() => {
+    console.log("📄 Lý do:", reason || "Unknown");
+
+    const tReconnect = setTimeout(() => {
 
         isReconnecting = false;
 
@@ -119,10 +139,10 @@ function scheduleReconnect(reason) {
 
     }, delay);
 
-    activeTimeouts.push(t);
+    activeTimeouts.push(tReconnect);
 }
 
-// ===== KHỞI ĐỘNG BOT =====
+// ===== START BOT =====
 function startBot() {
 
     clearAllTimers();
@@ -134,7 +154,7 @@ function startBot() {
         currentBot = null;
     }
 
-    console.log("🚀 Đang khởi tạo bot...");
+    console.log("🚀 Đang tạo bot mới...");
 
     const bot = mineflayer.createBot({
         host: "zincmii.play.hosting",
@@ -160,7 +180,22 @@ function startBot() {
 
     });
 
-    // ===== CHAT / AUTH =====
+    // ===== LOGIN CHECK LOOP =====
+    const iCheckAuth = setInterval(() => {
+
+        if (currentBot !== bot) return;
+
+        if (!authDone) {
+
+            console.log("⏳ Đang chờ xác thực...");
+
+        }
+
+    }, 15000);
+
+    activeIntervals.push(iCheckAuth);
+
+    // ===== MESSAGE =====
     bot.on("message", (jsonMsg) => {
 
         const text = jsonMsg.toString();
@@ -168,53 +203,137 @@ function startBot() {
 
         console.log("📩 CHAT:", text);
 
-        // ===== AUTO AUTH =====
-        if (!authSent) {
-
-            // REGISTER
-            if (
+        // ===== REGISTER =====
+        if (
+            !authSent &&
+            (
                 lower.includes("/register") ||
                 lower.includes("đăng ký") ||
                 lower.includes("register with")
-            ) {
+            )
+        ) {
 
-                authSent = true;
+            authSent = true;
 
-                console.log("🔑 Phát hiện REGISTER");
+            console.log("🔑 Phát hiện REGISTER");
+            console.log("⏳ Chờ 10s trước khi register...");
 
-                setTimeout(() => {
+            const tRegister = setTimeout(() => {
 
-                    if (currentBot !== bot) return;
+                if (currentBot !== bot) return;
 
-                    console.log("⌨️ Gửi lệnh register");
+                let registerCount = 0;
 
-                    bot.chat("/register BotAFK123 BotAFK123");
+                console.log("🚀 Bắt đầu gửi register");
 
-                }, 2500);
-            }
+                const iRegister = setInterval(() => {
 
-            // LOGIN
-            else if (
+                    if (currentBot !== bot) {
+                        clearInterval(iRegister);
+                        return;
+                    }
+
+                    registerCount++;
+
+                    console.log(
+                        `⌨️ Register lần ${registerCount}/3`
+                    );
+
+                    bot.chat(
+                        "/register BotAFK123 BotAFK123"
+                    );
+
+                    if (registerCount >= 3) {
+
+                        clearInterval(iRegister);
+
+                        console.log(
+                            "✅ Hoàn thành gửi register"
+                        );
+                    }
+
+                }, 3000);
+
+                activeIntervals.push(iRegister);
+
+                registerCount++;
+
+                console.log(
+                    `⌨️ Register lần ${registerCount}/3`
+                );
+
+                bot.chat(
+                    "/register BotAFK123 BotAFK123"
+                );
+
+            }, 10000);
+
+            activeTimeouts.push(tRegister);
+        }
+
+        // ===== LOGIN =====
+        else if (
+            !authSent &&
+            (
                 lower.includes("/login") ||
                 lower.includes("đăng nhập") ||
                 lower.includes("please login") ||
                 lower.includes("hãy đăng nhập")
-            ) {
+            )
+        ) {
 
-                authSent = true;
+            authSent = true;
 
-                console.log("🔑 Phát hiện LOGIN");
+            console.log("🔑 Phát hiện LOGIN");
+            console.log("⏳ Chờ 10s trước khi login...");
 
-                setTimeout(() => {
+            const tLogin = setTimeout(() => {
 
-                    if (currentBot !== bot) return;
+                if (currentBot !== bot) return;
 
-                    console.log("⌨️ Gửi lệnh login");
+                let loginCount = 0;
+
+                console.log("🚀 Bắt đầu gửi login");
+
+                const iLogin = setInterval(() => {
+
+                    if (currentBot !== bot) {
+                        clearInterval(iLogin);
+                        return;
+                    }
+
+                    loginCount++;
+
+                    console.log(
+                        `⌨️ Login lần ${loginCount}/3`
+                    );
 
                     bot.chat("/login BotAFK123");
 
-                }, 2500);
-            }
+                    if (loginCount >= 3) {
+
+                        clearInterval(iLogin);
+
+                        console.log(
+                            "✅ Hoàn thành gửi login"
+                        );
+                    }
+
+                }, 3000);
+
+                activeIntervals.push(iLogin);
+
+                loginCount++;
+
+                console.log(
+                    `⌨️ Login lần ${loginCount}/3`
+                );
+
+                bot.chat("/login BotAFK123");
+
+            }, 10000);
+
+            activeTimeouts.push(tLogin);
         }
 
         // ===== LOGIN SUCCESS =====
@@ -234,7 +353,6 @@ function startBot() {
             console.log("✅ Đăng nhập thành công");
             console.log("🔥 Kích hoạt Anti-AFK");
 
-            // ===== ANTI AFK =====
             const iAntiAfk = setInterval(() => {
 
                 if (currentBot !== bot) return;
@@ -243,12 +361,16 @@ function startBot() {
                     "jump",
                     "look",
                     "punch",
-                    "sneak",
-                    "move"
+                    "move",
+                    "sneak"
                 ];
 
                 const action =
-                    actions[Math.floor(Math.random() * actions.length)];
+                    actions[
+                        Math.floor(
+                            Math.random() * actions.length
+                        )
+                    ];
 
                 // ===== JUMP =====
                 if (action === "jump") {
@@ -258,19 +380,26 @@ function startBot() {
                     bot.setControlState("jump", true);
 
                     setTimeout(() => {
+
                         bot.setControlState("jump", false);
+
                     }, 500);
                 }
 
                 // ===== LOOK =====
                 else if (action === "look") {
 
-                    const yaw = Math.random() * Math.PI * 2;
-                    const pitch = (Math.random() - 0.5) * 0.5;
+                    const yaw =
+                        Math.random() * Math.PI * 2;
+
+                    const pitch =
+                        (Math.random() - 0.5) * 0.4;
 
                     bot.look(yaw, pitch, true);
 
-                    console.log("👀 Bot đổi góc nhìn");
+                    console.log(
+                        "👀 Bot đổi góc nhìn"
+                    );
                 }
 
                 // ===== PUNCH =====
@@ -279,18 +408,6 @@ function startBot() {
                     bot.swingArm("right");
 
                     console.log("🥊 Bot đánh tay");
-                }
-
-                // ===== SNEAK =====
-                else if (action === "sneak") {
-
-                    console.log("👣 Bot cúi");
-
-                    bot.setControlState("sneak", true);
-
-                    setTimeout(() => {
-                        bot.setControlState("sneak", false);
-                    }, 2000);
                 }
 
                 // ===== MOVE =====
@@ -304,14 +421,36 @@ function startBot() {
                     ];
 
                     const dir =
-                        dirs[Math.floor(Math.random() * dirs.length)];
+                        dirs[
+                            Math.floor(
+                                Math.random() * dirs.length
+                            )
+                        ];
 
-                    console.log(`🏃 Bot di chuyển ${dir}`);
+                    console.log(
+                        `🏃 Bot di chuyển ${dir}`
+                    );
 
                     bot.setControlState(dir, true);
 
                     setTimeout(() => {
+
                         bot.setControlState(dir, false);
+
+                    }, 2000);
+                }
+
+                // ===== SNEAK =====
+                else if (action === "sneak") {
+
+                    console.log("👣 Bot cúi");
+
+                    bot.setControlState("sneak", true);
+
+                    setTimeout(() => {
+
+                        bot.setControlState("sneak", false);
+
                     }, 2000);
                 }
 
@@ -322,22 +461,22 @@ function startBot() {
     });
 
     // ===== KICK =====
-    bot.on("kicked", (reason) => {
+    bot.on("kicked", reason => {
 
         kickReason =
             typeof reason === "object"
                 ? JSON.stringify(reason)
                 : String(reason);
 
-        console.log("🚫 Bị kick:");
-        console.log(kickReason);
+        console.log("🚫 Bị kick");
+        console.log("📄 Kick reason:", kickReason);
 
     });
 
     // ===== END =====
-    bot.on("end", (reason) => {
+    bot.on("end", reason => {
 
-        console.log("🔌 Mất kết nối");
+        console.log("🔌 Kết nối đóng");
 
         isConnected = false;
 
@@ -345,20 +484,23 @@ function startBot() {
 
         clearAllTimers();
 
-        scheduleReconnect(kickReason || reason);
-
+        scheduleReconnect(
+            kickReason || reason || "Unknown"
+        );
     });
 
     // ===== ERROR =====
-    bot.on("error", (err) => {
+    bot.on("error", err => {
 
         if (err.code === "ECONNREFUSED") {
 
-            console.error("❌ Server từ chối kết nối");
+            console.error(
+                "❌ Server từ chối kết nối"
+            );
 
         } else {
 
-            console.error(err);
+            console.error("BOT ERROR:", err);
 
         }
     });
@@ -369,8 +511,17 @@ function startBot() {
         if (currentBot !== bot) return;
 
         console.log(
-            `💓 Alive | Connected: ${isConnected} | Ping: ${bot.player?.ping || "?"}`
+            `💓 Alive | Connected=${isConnected} | Ping=${bot.player?.ping || "?"}`
         );
+
+        if (bot.entity?.position) {
+
+            const pos = bot.entity.position;
+
+            console.log(
+                `📍 XYZ ${pos.x.toFixed(1)} ${pos.y.toFixed(1)} ${pos.z.toFixed(1)}`
+            );
+        }
 
     }, 30000);
 
@@ -379,11 +530,13 @@ function startBot() {
 
 // ===== ROUTE =====
 app.get("/", (req, res) => {
+
     res.send(htmlTemplate);
+
 });
 
 // ===== SOCKET =====
-io.on("connection", (socket) => {
+io.on("connection", socket => {
 
     console.log("🖥️ Web client connected");
 
@@ -391,18 +544,18 @@ io.on("connection", (socket) => {
 
 });
 
-// ===== START SERVER =====
+// ===== START =====
 server.listen(PORT, () => {
 
     originalLog(
-        `🌐 Monitor chạy tại: http://localhost:${PORT}`
+        `🌐 Monitor chạy tại http://localhost:${PORT}`
     );
 
     startBot();
 
 });
 
-// ===== GIAO DIỆN WEB (GIỮ NGUYÊN) =====
+// ===== GIỮ NGUYÊN HTML TEMPLATE =====
 const htmlTemplate = `
 <!DOCTYPE html>
 <html lang="vi">
